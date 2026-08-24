@@ -1,0 +1,10 @@
+# Python 3.11+
+streamlit>=1.36
+pandas>=2.2
+numpy>=1.26
+yfinance>=0.2.40
+requests>=2.31
+PyYAML>=6.0
+plotly>=5.20
+APScheduler>=3.10
+pytest>=8.0

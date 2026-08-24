@@ -1,0 +1,52 @@
+# Copier ce fichier en config/settings.yaml puis renseigner vos valeurs.
+# config/settings.yaml est dans .gitignore : il ne sera jamais committe.
+
+# --- Identification requise par la SEC -------------------------------
+# La SEC exige un User-Agent identifiant (nom ou email) sur chaque appel,
+# sinon les requetes sont bloquees. Aucune cle API n'est necessaire.
+sec:
+  user_agent: "Investassist personnel - votre.email@exemple.fr"
+  rate_limit_per_second: 8      # limite officielle SEC : 10 req/s max
+
+# --- Yahoo Finance (via yfinance, pas de cle) ------------------------
+yahoo:
+  # yfinance utilise par defaut curl_cffi (impersonation TLS). Derriere
+  # certains proxys d'entreprise, cette couche echoue : mettre true pour
+  # forcer une session requests classique. Le code bascule aussi
+  # automatiquement en cas d'erreur TLS.
+  force_requests_session: false
+  rate_limit_per_second: 2      # non officiel : rester conservateur
+  max_workers: 4                # parallelisme du screening
+
+# --- Financial Modeling Prep (optionnel) -----------------------------
+# Cle gratuite : https://site.financialmodelingprep.com/developer/docs
+# Plan gratuit verifie (aout 2026) : 250 requetes/jour, actions US
+# uniquement, 5 trimestres de comptes seulement -> insuffisant pour du
+# 5 ans. Utilise ici uniquement pour un CONTROLE CROISE des ratios.
+fmp:
+  enabled: false
+  api_key: ""                   # ou variable d'environnement FMP_API_KEY
+  base_url: "https://financialmodelingprep.com/stable"
+  daily_request_budget: 200     # marge sous la limite de 250
+
+# --- Cache et stockage -----------------------------------------------
+storage:
+  database_path: "data/investassist.sqlite"
+  cache_dir: "data/cache"
+  cache_ttl_hours: 12           # 0 = pas de cache (deconseille : quotas)
+
+# --- Alertes ---------------------------------------------------------
+alerts:
+  # Notification locale : ecrit dans data/notifications.log et tente une
+  # notification de bureau (notify-send / osascript / winotify si dispo).
+  local_enabled: true
+  email_enabled: false
+  email:
+    smtp_host: "smtp.exemple.fr"
+    smtp_port: 587
+    use_starttls: true
+    username: ""
+    password: ""                # mot de passe d'application, pas le mot de passe principal
+    sender: "investassist@exemple.fr"
+    recipients:
+      - "votre.email@exemple.fr"

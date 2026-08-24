@@ -1,0 +1,22 @@
+# Données locales et secrets — ne jamais committer
+config/settings.yaml
+data/
+*.sqlite
+*.sqlite3
+*.db
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

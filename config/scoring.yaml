@@ -1,0 +1,187 @@
+# =====================================================================
+# METHODOLOGIE DE SCORING — entierement configurable, rien n'est code en dur
+# ---------------------------------------------------------------------
+# Le score composite est une moyenne ponderee de 5 piliers.
+# Chaque pilier est une moyenne ponderee de criteres.
+# Chaque critere est converti en sous-score 0-100 par une fonction
+# lineaire par morceaux ("points") : [valeur_brute, score].
+# En dehors des bornes, le score est borne (clamp) au premier/dernier point.
+#
+# Pourquoi des seuils absolus plutot qu'un rang centile dans l'univers ?
+# -> Un score absolu reste comparable d'une execution a l'autre et d'un
+#    univers a l'autre. Les alertes "changement de score" ne se declenchent
+#    donc que si les FONDAMENTAUX bougent, pas si la composition de
+#    l'univers analyse change. Seuls les criteres explicitement relatifs
+#    (P/E vs secteur) utilisent une comparaison aux pairs.
+# =====================================================================
+
+# --- Fenetre d'analyse -----------------------------------------------
+window:
+  target_years: 5        # fenetre visee
+  min_years: 3           # en dessous, le titre est exclu du classement
+  # La fenetre reellement utilisee est affichee par titre dans l'interface
+  # (badge "fenetre : N ans"). Voir README, section "Limites connues".
+
+# --- Regles d'exclusion / qualite de donnees --------------------------
+data_quality:
+  # Part minimale de criteres reellement calcules (ponderation cumulee)
+  # pour qu'un titre soit classe. En dessous : affiche dans la table
+  # "Donnees fondamentales incompletes", jamais dans le classement.
+  min_weight_coverage: 0.70
+  # Un pilier dont la couverture tombe sous ce seuil est neutralise
+  # (poids redistribue sur les autres piliers) et signale dans le detail.
+  min_pillar_coverage: 0.50
+
+# --- Ponderation des piliers (doit sommer a 1.0) ---------------------
+pillar_weights:
+  growth: 0.35           # critere central : capter la croissance
+  valuation: 0.25        # discipline de prix (PEG, P/E vs historique)
+  profitability: 0.20
+  balance_sheet: 0.15
+  dividend: 0.05         # faible : ne penalise pas les valeurs de croissance
+  qualitative: 0.00      # phase 2 (ton des communiques) — inactif par defaut
+
+# --- Criteres -------------------------------------------------------
+criteria:
+
+  # ================= CROISSANCE =================
+  revenue_cagr:
+    pillar: growth
+    weight: 0.40
+    label: "CAGR chiffre d'affaires"
+    unit: percent
+    higher_is_better: true
+    points: [[-0.10, 0], [0.0, 20], [0.05, 45], [0.10, 65], [0.20, 85], [0.35, 100]]
+
+  net_income_cagr:
+    pillar: growth
+    weight: 0.35
+    label: "CAGR resultat net"
+    unit: percent
+    higher_is_better: true
+    # Non calculable si le resultat de depart ou d'arrivee est negatif
+    # (un CAGR sur base negative n'a pas de sens) -> critere marque N/A.
+    points: [[-0.15, 0], [0.0, 20], [0.05, 42], [0.12, 65], [0.22, 85], [0.40, 100]]
+
+  net_margin_trend:
+    pillar: growth
+    weight: 0.25
+    label: "Evolution de la marge nette (points de %)"
+    unit: pp
+    higher_is_better: true
+    # Distingue une croissance rentable d'une croissance qui detruit la marge
+    points: [[-0.08, 0], [-0.03, 25], [0.0, 50], [0.03, 75], [0.08, 100]]
+
+  # ================= RENTABILITE =================
+  roe_avg:
+    pillar: profitability
+    weight: 0.55
+    label: "ROE moyen"
+    unit: percent
+    higher_is_better: true
+    points: [[0.0, 0], [0.05, 25], [0.10, 45], [0.15, 65], [0.25, 88], [0.40, 100]]
+
+  net_margin_avg:
+    pillar: profitability
+    weight: 0.45
+    label: "Marge nette moyenne"
+    unit: percent
+    higher_is_better: true
+    points: [[0.0, 0], [0.03, 25], [0.07, 45], [0.12, 65], [0.20, 85], [0.30, 100]]
+
+  # ================= QUALITE DU BILAN =================
+  net_debt_to_ebitda:
+    pillar: balance_sheet
+    weight: 0.60
+    label: "Dette nette / EBITDA"
+    unit: ratio
+    higher_is_better: false
+    # Tresorerie nette (valeur negative) = meilleur score
+    points: [[-1.0, 100], [0.0, 90], [1.0, 75], [2.0, 55], [3.0, 35], [4.0, 15], [6.0, 0]]
+
+  current_ratio:
+    pillar: balance_sheet
+    weight: 0.40
+    label: "Ratio de liquidite generale"
+    unit: ratio
+    higher_is_better: true
+    # Au-dela de 3, un ratio tres eleve n'est plus un signal de qualite
+    # (tresorerie oisive) : le score plafonne puis reflue legerement.
+    points: [[0.5, 0], [1.0, 40], [1.5, 75], [2.0, 100], [3.0, 100], [5.0, 85]]
+
+  # ================= DIVIDENDES =================
+  # Pilier a poids faible (5%). Un titre sans dividende obtient un score
+  # neutre (voir no_dividend_score) et n'est PAS penalise.
+  dividend_yield:
+    pillar: dividend
+    weight: 0.50
+    label: "Rendement du dividende"
+    unit: percent
+    higher_is_better: true
+    points: [[0.0, 50], [0.01, 60], [0.025, 78], [0.04, 92], [0.06, 100], [0.10, 70]]
+    # Rendement > 8-10% : souvent le signe d'un cours qui a chute ou d'un
+    # dividende non soutenable -> le score reflue volontairement.
+
+  dividend_growth_streak:
+    pillar: dividend
+    weight: 0.50
+    label: "Regularite / croissance du dividende"
+    unit: ratio
+    higher_is_better: true
+    # Indice 0-1 combinant nombre d'annees versees et croissance sur la periode
+    points: [[0.0, 50], [0.25, 62], [0.50, 78], [0.75, 90], [1.0, 100]]
+
+  no_dividend_score: 50   # score neutre attribue au pilier dividende si aucun versement
+
+  # ================= VALORISATION RELATIVE A LA CROISSANCE =================
+  peg_ratio:
+    pillar: valuation
+    weight: 0.40
+    label: "PEG (P/E rapporte a la croissance)"
+    unit: ratio
+    higher_is_better: false
+    # Non calculable si P/E <= 0 ou croissance <= 0 -> critere N/A
+    # (et non "excellent", erreur classique).
+    points: [[0.0, 100], [0.5, 95], [1.0, 80], [1.5, 60], [2.0, 42], [3.0, 20], [5.0, 0]]
+
+  pe_vs_own_history:
+    pillar: valuation
+    weight: 0.35
+    label: "P/E actuel vs sa moyenne historique"
+    unit: ratio
+    higher_is_better: false
+    # Ratio = P/E actuel / P/E moyen du titre sur la fenetre.
+    # < 1 : le titre se paie moins cher que sa propre norme.
+    points: [[0.5, 100], [0.75, 88], [1.0, 65], [1.25, 45], [1.5, 28], [2.0, 5]]
+
+  pe_vs_sector:
+    pillar: valuation
+    weight: 0.10
+    label: "P/E actuel vs mediane du secteur"
+    unit: ratio
+    higher_is_better: false
+    relative_to_peers: true   # calcule dans l'univers analyse, par secteur
+    points: [[0.5, 100], [0.75, 85], [1.0, 60], [1.5, 30], [2.5, 0]]
+
+  price_to_book:
+    pillar: valuation
+    weight: 0.15
+    label: "P/B (price-to-book)"
+    unit: ratio
+    higher_is_better: false
+    points: [[0.5, 100], [1.0, 88], [2.0, 70], [4.0, 48], [8.0, 25], [15.0, 0]]
+
+  # ================= SIGNAL QUALITATIF (phase 2, inactif) =================
+  communication_tone:
+    pillar: qualitative
+    weight: 1.0
+    label: "Ton des communiques recents"
+    unit: ratio
+    higher_is_better: true
+    enabled: false
+    points: [[-1.0, 0], [0.0, 50], [1.0, 100]]
+
+# --- Alertes : valeurs par defaut ------------------------------------
+alerts:
+  score_change_threshold: 5.0   # points de score composite
+  top_n: 20                     # perimetre des alertes entree/sortie de classement
