@@ -74,7 +74,7 @@ def test_historique_trop_court_exclut_du_classement():
     score = scoring.score_stock(fund, CONFIG)
     assert score.ranked is False
     assert "historique fondamental insuffisant" in score.exclusion_reason
-    assert "incompletes" in score.exclusion_reason
+    assert "incomplètes" in score.exclusion_reason
 
 
 def test_couverture_insuffisante_exclut_du_classement():

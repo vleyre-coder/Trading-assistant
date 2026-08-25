@@ -1,0 +1,45 @@
+# =====================================================================
+# ALERTES DE L'ANALYSE PLANIFIEE (GitHub Actions -> site Netlify)
+# ---------------------------------------------------------------------
+# Le site publie etant statique, il ne peut pas creer de regle depuis le
+# navigateur : les regles se declarent ici, dans le depot. Modifier ce
+# fichier et pousser suffit, la prochaine analyse en tiendra compte.
+#
+# Aucun identifiant SMTP dans ce fichier : ils proviennent des secrets
+# GitHub (voir README, section Deploiement).
+# =====================================================================
+
+email:
+  # Active l'envoi ; les identifiants viennent des secrets GitHub.
+  enabled: true
+  recipients:
+    - "v.leyre@dimeo-energie.fr"
+
+# Titres suivis par les alertes generales ci-dessous. Laisser vide pour
+# n'appliquer que les regles explicites de la section "rules".
+watchlist:
+  - "MSFT"
+  - "AIR.PA"
+  - "MC.PA"
+
+# Alertes appliquees automatiquement a chaque titre de la watchlist.
+general:
+  # Types actifs : score_change, top_n_entry, top_n_exit, earnings_published
+  kinds:
+    - "score_change"
+    - "top_n_entry"
+    - "top_n_exit"
+    - "earnings_published"
+  # Variation minimale du score composite, en points, pour notifier.
+  score_change_threshold: 5.0
+  # Perimetre des alertes d'entree et de sortie de classement.
+  top_n: 20
+
+# Regles specifiques, avec leur propre seuil.
+# kind : price_above | price_below | score_change | top_n_entry | top_n_exit
+#        | earnings_published
+rules: []
+  # Exemple :
+  # - ticker: "MC.PA"
+  #   kind: "price_below"
+  #   threshold: 500

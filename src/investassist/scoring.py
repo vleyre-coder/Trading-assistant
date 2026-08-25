@@ -60,15 +60,15 @@ def pe_vs_sector(fund: Fundamentals, medians: dict[str, float]) -> crit.Result:
     pe = fund.snapshot.trailing_pe
     sector = fund.snapshot.sector
     if pe is None or pe <= 0:
-        return None, "", "P/E courant indisponible ou negatif"
+        return None, "", "P/E courant indisponible ou négatif"
     if not sector:
-        return None, "", "secteur non renseigne par la source de donnees"
+        return None, "", "secteur non renseigne par la source de données"
     median = medians.get(sector)
     if median is None:
         return None, "", f"pas assez de pairs valorisables dans le secteur « {sector} » de l'univers analyse"
     if median <= 0:
-        return None, "", "mediane sectorielle non exploitable"
-    detail = f"P/E {pe:.1f} vs mediane du secteur « {sector} » {median:.1f}"
+        return None, "", "médiane sectorielle non exploitable"
+    detail = f"P/E {pe:.1f} vs médiane du secteur « {sector} » {median:.1f}"
     return pe / median, detail, ""
 
 
@@ -105,7 +105,7 @@ def score_stock(
 
         results: list[CriterionResult] = []
         for criterion in members:
-            value, detail, reason = values.get(criterion.key, (None, "", "critere non calcule"))
+            value, detail, reason = values.get(criterion.key, (None, "", "critère non calculé"))
             results.append(
                 CriterionResult(
                     key=criterion.key,
@@ -142,8 +142,8 @@ def score_stock(
                 neutralized=True,
             )
             score.warnings.append(
-                "Titre sans dividende : pilier dividende neutralise "
-                f"(score {cfg.no_dividend_score:.0f}/100), sans penalite."
+                "Titre sans dividende : pilier dividende neutralisé "
+                f"(score {cfg.no_dividend_score:.0f}/100), sans pénalité."
             )
         elif coverage < cfg.min_pillar_coverage:
             pillar_result = PillarResult(
@@ -185,18 +185,18 @@ def score_stock(
         reasons.append("aucun pilier calculable")
     if score.coverage < cfg.min_weight_coverage:
         reasons.append(
-            f"couverture des criteres trop faible ({score.coverage * 100:.0f} %, "
+            f"couverture des critères trop faible ({score.coverage * 100:.0f} %, "
             f"minimum {cfg.min_weight_coverage * 100:.0f} %)"
         )
     neutralized = [p.key for p in score.pillars.values() if p.score is None]
     if neutralized:
         score.warnings.append(
-            "Piliers neutralises faute de donnees : " + ", ".join(neutralized)
+            "Piliers neutralisés faute de données : " + ", ".join(neutralized)
         )
 
     if reasons:
         score.ranked = False
-        score.exclusion_reason = "Donnees fondamentales incompletes — " + " ; ".join(reasons)
+        score.exclusion_reason = "Données fondamentales incomplètes — " + " ; ".join(reasons)
     else:
         score.ranked = True
 

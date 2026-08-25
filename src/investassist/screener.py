@@ -156,7 +156,7 @@ class Screener:
                     # pas « mauvais », il n'a pas pu etre lu. Une relance suffit
                     # generalement.
                     failures[ticker] = (
-                        "aucune donnee recuperee (source momentanement "
+                        "aucune donnee récupérée (source momentanément "
                         "indisponible ou ticker inconnu) — relancer l'analyse"
                     )
                     continue
@@ -207,8 +207,8 @@ class Screener:
                 n_analyzed=len(scores),
                 n_ranked=len(ranked),
                 notes=(
-                    f"{len(excluded)} titre(s) exclu(s) pour donnees incompletes ; "
-                    f"{len(failures)} echec(s) de recuperation"
+                    f"{len(excluded)} titre(s) exclu(s) pour données incomplètes ; "
+                    f"{len(failures)} échec(s) de récupération"
                 ),
                 sector_medians=medians,
             )

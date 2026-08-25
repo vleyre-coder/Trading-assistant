@@ -141,7 +141,7 @@ def get_json(
                 return None
         if attempt < retries - 1:
             time.sleep(backoff * (2**attempt))
-    log.warning("GET %s abandonne apres %s tentatives : %s", url, retries, last_error)
+    log.warning("GET %s abandonne après %s tentatives : %s", url, retries, last_error)
     return None
 
 

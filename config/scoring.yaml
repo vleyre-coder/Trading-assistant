@@ -56,7 +56,7 @@ criteria:
   net_income_cagr:
     pillar: growth
     weight: 0.35
-    label: "CAGR resultat net"
+    label: "CAGR résultat net"
     unit: percent
     higher_is_better: true
     # Non calculable si le resultat de depart ou d'arrivee est negatif
@@ -66,7 +66,7 @@ criteria:
   net_margin_trend:
     pillar: growth
     weight: 0.25
-    label: "Evolution de la marge nette (points de %)"
+    label: "Évolution de la marge nette (points de %)"
     unit: pp
     higher_is_better: true
     # Distingue une croissance rentable d'une croissance qui detruit la marge
@@ -102,7 +102,7 @@ criteria:
   current_ratio:
     pillar: balance_sheet
     weight: 0.40
-    label: "Ratio de liquidite generale"
+    label: "Ratio de liquidité générale"
     unit: ratio
     higher_is_better: true
     # Au-dela de 3, un ratio tres eleve n'est plus un signal de qualite
@@ -125,7 +125,7 @@ criteria:
   dividend_growth_streak:
     pillar: dividend
     weight: 0.50
-    label: "Regularite / croissance du dividende"
+    label: "Régularité / croissance du dividende"
     unit: ratio
     higher_is_better: true
     # Indice 0-1 combinant nombre d'annees versees et croissance sur la periode
@@ -137,7 +137,7 @@ criteria:
   peg_ratio:
     pillar: valuation
     weight: 0.40
-    label: "PEG (P/E rapporte a la croissance)"
+    label: "PEG (P/E rapporté à la croissance)"
     unit: ratio
     higher_is_better: false
     # Non calculable si P/E <= 0 ou croissance <= 0 -> critere N/A
@@ -157,7 +157,7 @@ criteria:
   pe_vs_sector:
     pillar: valuation
     weight: 0.10
-    label: "P/E actuel vs mediane du secteur"
+    label: "P/E actuel vs médiane du secteur"
     unit: ratio
     higher_is_better: false
     relative_to_peers: true   # calcule dans l'univers analyse, par secteur
@@ -175,7 +175,7 @@ criteria:
   communication_tone:
     pillar: qualitative
     weight: 1.0
-    label: "Ton des communiques recents"
+    label: "Ton des communiqués récents"
     unit: ratio
     higher_is_better: true
     enabled: false

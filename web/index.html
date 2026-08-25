@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Investassist — classement fondamental</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📊</text></svg>">
+</head>
+<body>
+<div class="enveloppe">
+
+  <header class="principal">
+    <h1>Investassist</h1>
+    <p class="sous-titre">
+      Classement d'adéquation aux critères fondamentaux —
+      <span id="horodatage">chargement…</span>
+    </p>
+  </header>
+
+  <!-- Avertissement de non-conseil : affiché sur tous les onglets, non
+       masquable. Le texte provient des données publiées, de sorte qu'il ne
+       puisse pas diverger de celui du moteur d'analyse. -->
+  <div class="avertissement" role="note">
+    <strong>⚠️ <span id="avertissement-principal">Classement calculé à partir de données fondamentales
+    historiques et actuelles. Ne constitue pas un conseil en investissement ni une prédiction de
+    performance future.</span></strong>
+    <details>
+      <summary>Ce que ce classement mesure — et ce qu'il ne mesure pas</summary>
+      <p><strong>Ce que c'est.</strong> <span id="avertissement-est"></span></p>
+      <p><strong>Ce que ce n'est pas.</strong> <span id="avertissement-nest-pas"></span></p>
+      <p><strong>Limites des données.</strong> <span id="avertissement-donnees"></span></p>
+    </details>
+  </div>
+
+  <nav class="onglets" role="tablist">
+    <button role="tab" data-vue="classement" aria-selected="true">Classement</button>
+    <button role="tab" data-vue="watchlist" aria-selected="false">Ma watchlist</button>
+    <button role="tab" data-vue="exclus" aria-selected="false">Titres non classés</button>
+    <button role="tab" data-vue="methodologie" aria-selected="false">Méthodologie</button>
+  </nav>
+
+  <main id="contenu">
+    <div class="carte"><p class="vide">Chargement des données…</p></div>
+  </main>
+
+  <footer class="principal">
+    <p id="pied-avertissement">⚠️ Classement calculé à partir de données fondamentales historiques et
+    actuelles. Ne constitue pas un conseil en investissement ni une prédiction de performance future.</p>
+    <p class="note-discrete">
+      Outil personnel — aucune diffusion à des tiers. Données non auditées, issues de sources
+      gratuites (Yahoo Finance via yfinance, SEC EDGAR). Analyse recalculée automatiquement ;
+      cette page ne réalise aucun calcul et ne transmet aucune donnée.
+    </p>
+  </footer>
+
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

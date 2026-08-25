@@ -67,7 +67,7 @@ def test_variation_de_score(db):
     evenements = evaluate_rules(db, [score(composite=82.0)], CONFIG, previous=precedent)
     assert len(evenements) == 1
     assert "+7.0 pts" in evenements[0].message
-    assert "sans portee predictive" in evenements[0].message
+    assert "sans portée prédictive" in evenements[0].message
 
 
 def test_variation_de_score_sans_historique(db):

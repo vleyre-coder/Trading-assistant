@@ -216,7 +216,7 @@ class EdgarClient:
         self._filed = {}
         cik = self.ticker_to_cik(ticker)
         if not cik:
-            return [], [f"{ticker} absent du registre SEC (societe non cotee aux Etats-Unis)."]
+            return [], [f"{ticker} absent du registre SEC (société non cotée aux États-Unis)."]
 
         facts = self.company_facts(cik)
         if not facts:
@@ -277,7 +277,7 @@ class EdgarClient:
         missing_ebitda = sum(1 for r in records if r.get("ebitda") is None)
         if missing_ebitda == len(records):
             warnings.append(
-                "EDGAR : EBITDA non reconstituable (resultat operationnel ou "
+                "EDGAR : EBITDA non reconstituable (résultat opérationnel ou "
                 "amortissements absents des balises XBRL)."
             )
         return records, warnings

@@ -1,6 +1,8 @@
 # Données locales et secrets — ne jamais committer
 config/settings.yaml
-data/
+# Ancre a la racine : web/data/ contient les donnees publiees du site et
+# doit, lui, etre versionne.
+/data/
 *.sqlite
 *.sqlite3
 *.db

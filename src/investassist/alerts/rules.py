@@ -99,8 +99,8 @@ def evaluate_rules(
                         kind,
                         f"{ticker} : score composite {_fmt(float(before), 1)} → "
                         f"{_fmt(score.composite, 1)} ({delta:+.1f} pts, seuil "
-                        f"{threshold:.1f}). Variation des criteres fondamentaux, "
-                        "sans portee predictive.",
+                        f"{threshold:.1f}). Variation des critères fondamentaux, "
+                        "sans portée prédictive.",
                         rule["id"],
                     )
                 )
@@ -117,8 +117,8 @@ def evaluate_rules(
                         AlertEvent(
                             ticker,
                             kind,
-                            f"{ticker} : nouvelle publication de resultats detectee "
-                            f"(periode de reference {last}, precedente {seen}).",
+                            f"{ticker} : nouvelle publication de résultats détectée "
+                            f"(période de référence {last}, précédente {seen}).",
                             rule["id"],
                         )
                     )
@@ -145,9 +145,9 @@ def evaluate_rules(
                         ticker,
                         kind,
                         f"{ticker} entre dans le top {top_n} du classement "
-                        f"(rang {now_rank}, precedemment "
+                        f"(rang {now_rank}, précédemment "
                         f"{was_rank if was_rank else 'hors classement'}). "
-                        "Classement d'adequation aux criteres, non predictif.",
+                        "Classement d'adéquation aux critères, non predictif.",
                         rule["id"],
                     )
                 )
@@ -158,7 +158,7 @@ def evaluate_rules(
                         kind,
                         f"{ticker} sort du top {top_n} du classement "
                         f"(rang {now_rank if now_rank else 'hors classement'}, "
-                        f"precedemment {was_rank}).",
+                        f"précédemment {was_rank}).",
                         rule["id"],
                     )
                 )

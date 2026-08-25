@@ -49,9 +49,9 @@ def cagr(series: Sequence[tuple[int, float]]) -> tuple[float | None, str]:
     if years <= 0:
         return None, "exercices non distincts"
     if v0 <= 0:
-        return None, f"base de depart negative ou nulle ({y0})"
+        return None, f"base de départ négative ou nulle ({y0})"
     if v1 <= 0:
-        return None, f"valeur d'arrivee negative ou nulle ({y1})"
+        return None, f"valeur d'arrivée négative ou nulle ({y1})"
     return (v1 / v0) ** (1 / years) - 1, ""
 
 
@@ -73,7 +73,7 @@ def net_income_cagr(fund: Fundamentals) -> Result:
     series = fund.series("net_income")
     value, reason = cagr(series)
     if value is None:
-        return None, "", f"CAGR du resultat net non calculable : {reason}"
+        return None, "", f"CAGR du résultat net non calculable : {reason}"
     cur = fund.snapshot.currency
     detail = (
         f"{series[0][0]} : {_fmt_money(series[0][1], cur)} → "
@@ -115,7 +115,7 @@ def net_margin_trend(fund: Fundamentals) -> Result:
 def net_margin_avg(fund: Fundamentals) -> Result:
     margins = _net_margins(fund)
     if not margins:
-        return None, "", "marge nette non calculable (chiffre d'affaires ou resultat absent)"
+        return None, "", "marge nette non calculable (chiffre d'affaires ou résultat absent)"
     value = sum(m for _, m in margins) / len(margins)
     detail = f"moyenne sur {len(margins)} exercices : " + ", ".join(
         f"{y} {_pct(m, 0)}" for y, m in margins
@@ -140,13 +140,13 @@ def roe_avg(fund: Fundamentals) -> Result:
             continue
         values.append((rec.fiscal_year, net / equity))
     if not values:
-        return None, "", "ROE non calculable (fonds propres ou resultat net absents)"
+        return None, "", "ROE non calculable (fonds propres ou résultat net absents)"
     value = sum(v for _, v in values) / len(values)
     detail = f"moyenne sur {len(values)} exercices : " + ", ".join(
         f"{y} {_pct(v, 0)}" for y, v in values
     )
     if skipped:
-        detail += f" — exercices a fonds propres negatifs ecartes : {skipped}"
+        detail += f" — exercices à fonds propres négatifs écartés : {skipped}"
     return value, detail, ""
 
 
@@ -157,18 +157,18 @@ def net_debt_to_ebitda(fund: Fundamentals) -> Result:
         if debt is None or ebitda is None:
             continue
         if ebitda <= 0:
-            return None, "", f"EBITDA negatif ou nul en {rec.fiscal_year} — ratio non interpretable"
+            return None, "", f"EBITDA négatif ou nul en {rec.fiscal_year} — ratio non interprétable"
         net_debt = debt - (cash or 0.0)
         cur = fund.snapshot.currency
         detail = (
-            f"exercice {rec.fiscal_year} : dette {_fmt_money(debt, cur)} − tresorerie "
+            f"exercice {rec.fiscal_year} : dette {_fmt_money(debt, cur)} − trésorerie "
             f"{_fmt_money(cash, cur)} = {_fmt_money(net_debt, cur)} ; EBITDA "
             f"{_fmt_money(ebitda, cur)}"
         )
         if net_debt < 0:
-            detail += " (tresorerie nette positive)"
+            detail += " (trésorerie nette positive)"
         return net_debt / ebitda, detail, ""
-    return None, "", "dette totale ou EBITDA absents des donnees disponibles"
+    return None, "", "dette totale ou EBITDA absents des données disponibles"
 
 
 def current_ratio(fund: Fundamentals) -> Result:
@@ -182,7 +182,7 @@ def current_ratio(fund: Fundamentals) -> Result:
             f"passifs courants {_fmt_money(cl, cur)}"
         )
         return ca / cl, detail, ""
-    return None, "", "actifs ou passifs courants absents des donnees disponibles"
+    return None, "", "actifs ou passifs courants absents des données disponibles"
 
 
 def dividend_yield(fund: Fundamentals) -> Result:
@@ -216,10 +216,10 @@ def dividend_growth_streak(fund: Fundamentals) -> Result:
     if not positive:
         if partial:
             return None, "", (
-                "dividende connu uniquement sur l'annee civile en cours, encore "
-                "incomplete — critere non evalue"
+                "dividende connu uniquement sur l'année civile en cours, encore "
+                "incomplète — critère non évalué"
             )
-        return None, "", "titre ne versant pas de dividende sur la fenetre analysee"
+        return None, "", "titre ne versant pas de dividende sur la fenêtre analysée"
 
     window_years = max(len([r for r in fund.annual if r.fiscal_year < current_year]), 1)
     consistency = min(len(positive) / window_years, 1.0)
@@ -238,10 +238,10 @@ def dividend_growth_streak(fund: Fundamentals) -> Result:
 
     detail = (
         f"{len(positive)}/{window_years} exercices avec versement ; {growth_txt}"
-        + (" ; baisse constatee sur la periode" if cut else "")
+        + (" ; baisse constatée sur la période" if cut else "")
         + " — "
         + ", ".join(f"{y} {v:.2f}" for y, v in positive)
-        + (f" (annee {current_year} en cours, exclue du calcul)" if partial else "")
+        + (f" (année {current_year} en cours, exclue du calcul)" if partial else "")
     )
     return index, detail, ""
 
@@ -249,9 +249,9 @@ def dividend_growth_streak(fund: Fundamentals) -> Result:
 def price_to_book(fund: Fundamentals) -> Result:
     pb = fund.snapshot.price_to_book
     if pb is None:
-        return None, "", "P/B non fourni par la source de donnees"
+        return None, "", "P/B non fourni par la source de données"
     if pb <= 0:
-        return None, "", "P/B negatif (fonds propres comptables negatifs)"
+        return None, "", "P/B négatif (fonds propres comptables négatifs)"
     return pb, f"P/B courant : {pb:.2f}", ""
 
 
@@ -260,11 +260,11 @@ def eps_growth_rate(fund: Fundamentals) -> tuple[float | None, str]:
     eps = fund.series("eps_diluted")
     value, _ = cagr(eps)
     if value is not None:
-        return value, f"TCAM du BPA dilue {_pct(value)} ({eps[0][0]}-{eps[-1][0]})"
+        return value, f"TCAM du BPA dilué {_pct(value)} ({eps[0][0]}-{eps[-1][0]})"
     net = fund.series("net_income")
     value, _ = cagr(net)
     if value is not None:
-        return value, f"TCAM du resultat net {_pct(value)} ({net[0][0]}-{net[-1][0]})"
+        return value, f"TCAM du résultat net {_pct(value)} ({net[0][0]}-{net[-1][0]})"
     return None, ""
 
 
@@ -278,12 +278,12 @@ def peg_ratio(fund: Fundamentals) -> Result:
     if pe is None:
         return None, "", "P/E courant non disponible"
     if pe <= 0:
-        return None, "", "P/E negatif (societe en perte) — PEG non interpretable"
+        return None, "", "P/E négatif (société en perte) — PEG non interprétable"
     growth, growth_txt = eps_growth_rate(fund)
     if growth is None:
-        return None, "", "croissance des benefices non calculable"
+        return None, "", "croissance des bénéfices non calculable"
     if growth <= 0:
-        return None, "", f"croissance des benefices negative ou nulle ({_pct(growth)}) — PEG non interpretable"
+        return None, "", f"croissance des bénéfices négative ou nulle ({_pct(growth)}) — PEG non interprétable"
     value = pe / (growth * 100)
     detail = f"P/E {pe:.1f} ÷ croissance {growth * 100:.1f} — {growth_txt}"
     return value, detail, ""
@@ -312,10 +312,10 @@ def historical_pe(fund: Fundamentals, prices: pd.DataFrame | None) -> tuple[list
 def pe_vs_own_history(fund: Fundamentals, prices: pd.DataFrame | None) -> Result:
     pe = fund.snapshot.trailing_pe
     if pe is None or pe <= 0:
-        return None, "", "P/E courant indisponible ou negatif"
+        return None, "", "P/E courant indisponible ou négatif"
     history, reason = historical_pe(fund, prices)
     if len(history) < 3:
-        return None, "", f"historique de P/E insuffisant ({len(history)} exercices, 3 requis) : {reason or 'donnees partielles'}"
+        return None, "", f"historique de P/E insuffisant ({len(history)} exercices, 3 requis) : {reason or 'données partielles'}"
     mean_pe = sum(v for _, v in history) / len(history)
     if mean_pe <= 0:
         return None, "", "P/E moyen historique non exploitable"

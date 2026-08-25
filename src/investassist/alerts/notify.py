@@ -79,7 +79,7 @@ class Notifier:
             return False
 
         body_lines = [
-            f"{len(events)} alerte(s) declenchee(s) sur vos seuils personnels :",
+            f"{len(events)} alerte(s) déclenchée(s) sur vos seuils personnels :",
             "",
         ]
         for e in events:

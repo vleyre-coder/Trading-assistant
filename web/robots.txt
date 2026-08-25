@@ -1,0 +1,3 @@
+# Outil personnel : aucune indexation souhaitee.
+User-agent: *
+Disallow: /

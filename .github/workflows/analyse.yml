@@ -1,0 +1,110 @@
+# =====================================================================
+# Analyse fondamentale planifiee -> publication du site Netlify
+# ---------------------------------------------------------------------
+# GitHub Actions execute l'analyse (Python, ~8 minutes), ecrit les fichiers
+# JSON dans web/data/ et les pousse sur la branche. Netlify, connecte au
+# depot, publie automatiquement le resultat : aucune minute de build
+# Netlify n'est consommee, puisqu'il n'y a rien a construire.
+# =====================================================================
+name: Analyse fondamentale
+
+on:
+  schedule:
+    # 06h00 UTC du lundi au vendredi (08h00 a Paris en heure d'ete).
+    # Les cours de la veille sont alors disponibles sur toutes les places.
+    - cron: "0 6 * * 1-5"
+  # Bouton « Run workflow » dans l'onglet Actions, pour relancer a la demande.
+  workflow_dispatch:
+    inputs:
+      universes:
+        description: "Univers a analyser (vide = configuration par defaut)"
+        required: false
+        default: ""
+
+concurrency:
+  # Deux analyses simultanees se disputeraient le meme fichier d'historique
+  # et se feraient brider par Yahoo Finance.
+  group: analyse-fondamentale
+  cancel-in-progress: false
+
+jobs:
+  analyser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      # Necessaire pour repousser les fichiers de donnees mis a jour.
+      contents: write
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dependances
+        # Le site n'a besoin ni de Streamlit ni de Plotly : seul le moteur
+        # d'analyse tourne ici.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install yfinance pandas numpy requests PyYAML
+
+      - name: Lancer l'analyse et generer les donnees du site
+        env:
+          # La SEC exige un contact identifiable sur chaque requete.
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          INVESTASSIST_EMAIL_ENABLED: ${{ secrets.INVESTASSIST_EMAIL_ENABLED }}
+          INVESTASSIST_SMTP_HOST: ${{ secrets.INVESTASSIST_SMTP_HOST }}
+          INVESTASSIST_SMTP_PORT: ${{ secrets.INVESTASSIST_SMTP_PORT }}
+          INVESTASSIST_SMTP_USER: ${{ secrets.INVESTASSIST_SMTP_USER }}
+          INVESTASSIST_SMTP_PASSWORD: ${{ secrets.INVESTASSIST_SMTP_PASSWORD }}
+          INVESTASSIST_SMTP_SENDER: ${{ secrets.INVESTASSIST_SMTP_SENDER }}
+          INVESTASSIST_EMAIL_RECIPIENTS: ${{ secrets.INVESTASSIST_EMAIL_RECIPIENTS }}
+        run: |
+          python scripts/build_site.py ${{ github.event.inputs.universes && format('--universes {0}', github.event.inputs.universes) || '' }}
+
+      - name: Verifier que les donnees sont exploitables
+        # Garde-fou : mieux vaut conserver la derniere analyse valide que
+        # publier un classement vide a la suite d'une panne de source.
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          fichier = Path("web/data/ranking.json")
+          if not fichier.exists():
+              sys.exit("ranking.json absent : analyse interrompue.")
+          donnees = json.loads(fichier.read_text(encoding="utf-8"))
+          classes = donnees.get("counts", {}).get("ranked", 0)
+          print(f"{classes} titres classes.")
+          if classes < 10:
+              sys.exit(
+                  f"Seulement {classes} titres classes : resultat juge non "
+                  "publiable, la version precedente est conservee."
+              )
+          PY
+
+      - name: Publier les donnees
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/ranking.json web/data/history.json web/data/alert_state.json
+          if git diff --cached --quiet; then
+            echo "Aucun changement a publier."
+            exit 0
+          fi
+          git commit -m "Analyse du $(date -u '+%d/%m/%Y %H:%M UTC')"
+          # Une autre execution a pu pousser entre-temps : on rejoue par-dessus.
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Conserver le classement en artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyse-${{ github.run_number }}
+          path: web/data/
+          retention-days: 14

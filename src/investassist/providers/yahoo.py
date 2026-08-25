@@ -97,7 +97,7 @@ class YahooClient:
             if tentative < attempts - 1:
                 time.sleep(1.5 * (tentative + 1))
         log.warning(
-            "Yahoo : %s indisponible pour %s apres %s tentatives (bridage probable).",
+            "Yahoo : %s indisponible pour %s après %s tentatives (bridage probable).",
             fn_name,
             ticker,
             attempts,
@@ -124,7 +124,7 @@ class YahooClient:
             name = type(exc).__name__
             if not self._use_plain_session and not _retried:
                 log.info(
-                    "yfinance : couche TLS par defaut indisponible (%s), bascule sur "
+                    "yfinance : couche TLS par défaut indisponible (%s), bascule sur "
                     "une session requests classique.",
                     name,
                 )
@@ -181,8 +181,8 @@ class YahooClient:
                 self.cache.set("yahoo_info", ticker, info)
             else:
                 log.warning(
-                    "Yahoo : donnees de marche incompletes pour %s (bridage probable) — "
-                    "non mises en cache, certains criteres seront marques N/A.",
+                    "Yahoo : données de marché incomplètes pour %s (bridage probable) — "
+                    "non mises en cache, certains critères seront marques N/A.",
                     ticker,
                 )
 
@@ -272,7 +272,7 @@ class YahooClient:
         income = self._fetch(ticker, "income_stmt")
         balance = self._fetch(ticker, "balance_sheet")
         if income is None or not hasattr(income, "columns") or income.empty:
-            return [], [f"Yahoo : etats financiers annuels indisponibles pour {ticker}."]
+            return [], [f"Yahoo : états financiers annuels indisponibles pour {ticker}."]
 
         dividends_by_year = self.dividends_by_year(ticker, use_cache=use_cache)
 
@@ -296,8 +296,8 @@ class YahooClient:
 
         if balance is None or not hasattr(balance, "columns") or balance.empty:
             warnings.append(
-                f"Yahoo : bilan annuel indisponible pour {ticker} — criteres de "
-                "qualite de bilan non calculables."
+                f"Yahoo : bilan annuel indisponible pour {ticker} — critères de "
+                "qualité de bilan non calculables."
             )
 
         if use_cache:

@@ -164,6 +164,30 @@ def load_settings(path: Path | None = None) -> Settings:
         q = Path(p)
         return q if q.is_absolute() else PROJECT_ROOT / q
 
+    # Configuration SMTP par variables d'environnement : indispensable pour une
+    # execution automatisee (GitHub Actions), ou les identifiants proviennent
+    # de secrets et ne doivent jamais figurer dans un fichier du depot.
+    email_config = dict(alerts.get("email") or {})
+    correspondances = {
+        "smtp_host": "INVESTASSIST_SMTP_HOST",
+        "smtp_port": "INVESTASSIST_SMTP_PORT",
+        "username": "INVESTASSIST_SMTP_USER",
+        "password": "INVESTASSIST_SMTP_PASSWORD",
+        "sender": "INVESTASSIST_SMTP_SENDER",
+    }
+    for cle, variable in correspondances.items():
+        valeur = os.environ.get(variable)
+        if valeur:
+            email_config[cle] = int(valeur) if cle == "smtp_port" else valeur
+    destinataires = os.environ.get("INVESTASSIST_EMAIL_RECIPIENTS")
+    if destinataires:
+        email_config["recipients"] = [
+            adresse.strip() for adresse in destinataires.split(",") if adresse.strip()
+        ]
+    email_active = bool(alerts.get("email_enabled", False))
+    if os.environ.get("INVESTASSIST_EMAIL_ENABLED"):
+        email_active = os.environ["INVESTASSIST_EMAIL_ENABLED"].lower() in ("1", "true", "oui", "yes")
+
     return Settings(
         sec_user_agent=os.environ.get("SEC_USER_AGENT")
         or str(sec.get("user_agent") or "Investassist personnel - contact non renseigne"),
@@ -187,8 +211,8 @@ def load_settings(path: Path | None = None) -> Settings:
         ),
         cache_ttl_hours=float(storage.get("cache_ttl_hours", 12)),
         alerts_local_enabled=bool(alerts.get("local_enabled", True)),
-        alerts_email_enabled=bool(alerts.get("email_enabled", False)),
-        email=alerts.get("email") or {},
+        alerts_email_enabled=email_active,
+        email=email_config,
     )
 
 

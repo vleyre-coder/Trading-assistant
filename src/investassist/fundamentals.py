@@ -153,9 +153,9 @@ class FundamentalsService:
                 if not adjusted:
                     splits = {}
             if splits:
-                sources["eps_diluted"] = f"{sources.get('eps_diluted', 'edgar')} (retraite des splits)"
+                sources["eps_diluted"] = f"{sources.get('eps_diluted', 'edgar')} (retraité des splits)"
                 warnings.append(
-                    "Donnees par action retraitees des divisions d'actions "
+                    "Données par action retraitées des divisions d'actions "
                     f"({', '.join(sorted(splits))})."
                 )
 
@@ -177,7 +177,7 @@ class FundamentalsService:
 
         if window and len(window) < target_years:
             warnings.append(
-                f"Fenetre reduite a {len(window)} exercices ({window[0].fiscal_year}-"
+                f"Fenêtre réduite a {len(window)} exercices ({window[0].fiscal_year}-"
                 f"{window[-1].fiscal_year}) : historique gratuit limite pour ce titre."
             )
 

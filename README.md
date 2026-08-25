@@ -276,6 +276,128 @@ alerts:
 Chaque email porte le rappel que l'alerte constate un franchissement de seuil
 que vous avez défini vous-même, et ne constitue pas une incitation à agir.
 
+## Déploiement sur Netlify (consultation depuis n'importe où)
+
+Netlify ne peut pas héberger l'application Streamlit : il sert des fichiers
+statiques et des fonctions serverless de courte durée, alors que Streamlit
+exige un serveur Python permanent. Le déploiement retenu contourne cette
+limite en séparant le calcul de l'affichage :
+
+```
+GitHub Actions (nuit)          dépôt GitHub              Netlify
+┌──────────────────┐          ┌──────────────┐        ┌─────────────────┐
+│ analyse Python   │  push    │ web/data/    │ deploy │ site statique   │
+│ ~8 min, 143 titres├────────►│  *.json      ├───────►│ + mot de passe  │
+│ + envoi d'alertes│          │ web/*.html   │  auto  │ (fonction edge) │
+└──────────────────┘          └──────────────┘        └─────────────────┘
+```
+
+Netlify ne construit rien (`command = ""`) : il publie le dossier `web/` tel
+quel. **Aucune minute de build Netlify n'est consommée.**
+
+### Mise en place, une seule fois
+
+**1. Connecter le dépôt à Netlify**
+Sur Netlify : *Add new site → Import an existing project → GitHub*, choisir ce
+dépôt et la branche. Laisser la configuration proposée : `netlify.toml` fixe
+déjà le répertoire à publier (`web`) et l'absence de commande de build.
+
+**2. Définir le mot de passe du site**
+Netlify : *Site configuration → Environment variables → Add a variable*,
+nom `SITE_PASSWORD`, valeur au choix. La fonction edge
+`netlify/edge-functions/auth.ts` demandera ce mot de passe à chaque visite
+(le nom d'utilisateur est libre). **Sans cette variable, le site reste
+accessible à quiconque connaît l'URL** — c'est un choix délibéré pour ne pas
+rendre le site inaccessible par simple oubli, mais pensez à la définir.
+
+**3. Renseigner les secrets GitHub**
+Dépôt GitHub : *Settings → Secrets and variables → Actions → New repository
+secret*.
+
+| Secret | Rôle | Obligatoire |
+|---|---|---|
+| `SEC_USER_AGENT` | Identification exigée par la SEC, ex. `Investassist personnel - vous@exemple.fr` | oui |
+| `INVESTASSIST_EMAIL_ENABLED` | `true` pour activer les alertes email | non |
+| `INVESTASSIST_SMTP_HOST` | Serveur SMTP, ex. `smtp.gmail.com` | si email |
+| `INVESTASSIST_SMTP_PORT` | `587` (STARTTLS) ou `465` (SSL) | si email |
+| `INVESTASSIST_SMTP_USER` | Identifiant SMTP | si email |
+| `INVESTASSIST_SMTP_PASSWORD` | **Mot de passe d'application**, jamais le mot de passe principal | si email |
+| `INVESTASSIST_SMTP_SENDER` | Adresse d'expédition | si email |
+| `INVESTASSIST_EMAIL_RECIPIENTS` | Destinataires, séparés par des virgules | si email |
+
+**4. Lancer la première analyse**
+Onglet *Actions → Analyse fondamentale → Run workflow*. Elle prend environ
+8 minutes, pousse les fichiers de données, et Netlify publie dans la foulée.
+Ensuite, l'analyse tourne automatiquement du lundi au vendredi à 06h00 UTC
+(08h00 à Paris en heure d'été) — modifiable dans
+`.github/workflows/analyse.yml`.
+
+### Ce que le site propose
+
+- Classement complet, triable par n'importe quelle colonne, filtrable par
+  zone, par secteur et par recherche textuelle.
+- Détail par titre : sous-scores des cinq piliers, puis chaque critère avec sa
+  valeur, son sous-score et l'explication du calcul.
+- Courbe d'évolution du score composite d'une analyse à l'autre.
+- Titres non classés, avec le motif exact, et échecs de récupération à part.
+- Méthodologie complète : pondérations, barèmes, règles d'exclusion.
+- Watchlist personnelle, stockée **dans votre navigateur uniquement**
+  (`localStorage`) : rien n'est transmis, mais elle ne suit pas d'un appareil
+  à l'autre.
+- Avertissement de non-conseil présent dans le HTML servi — un test vérifie
+  qu'il ne dépend pas de l'exécution du JavaScript.
+
+### Ce que le site ne fait pas
+
+- **Pas de recalcul à la demande** : le classement est celui de la dernière
+  analyse planifiée. Pour rafraîchir, lancez le workflow manuellement depuis
+  l'onglet Actions (~8 min).
+- **Pas de création d'alerte depuis le navigateur** : un site statique n'a pas
+  de serveur pour les mémoriser. Les règles se déclarent dans
+  `config/alerts.yaml` — modifier ce fichier et pousser suffit, l'analyse
+  suivante en tiendra compte.
+
+### Configuration des alertes planifiées
+
+```yaml
+# config/alerts.yaml
+watchlist: ["MSFT", "AIR.PA"]      # titres suivis par les alertes générales
+general:
+  kinds: ["score_change", "top_n_entry", "top_n_exit", "earnings_published"]
+  score_change_threshold: 5.0
+  top_n: 20
+rules:                             # règles avec seuil propre
+  - ticker: "MC.PA"
+    kind: "price_below"
+    threshold: 500
+```
+
+La mémoire des alertes (seuil déjà franchi, dernière publication vue) voyage
+dans `web/data/alert_state.json`, publié avec le site : une exécution en
+intégration continue ne conserve aucun disque, mais le moteur d'alertes reste
+strictement le même qu'en local. À la toute première analyse, aucune alerte
+n'est envoyée : sans point de comparaison, chaque titre paraîtrait « entrer »
+dans le classement.
+
+### Coûts et quotas
+
+- **Netlify** : aucune minute de build (rien n'est construit), seulement de la
+  bande passante — quelques centaines de kilo-octets par visite.
+- **GitHub Actions** : environ 10 minutes par exécution, soit ~220 minutes par
+  mois pour cinq analyses hebdomadaires. Le quota gratuit est de 2 000 minutes
+  par mois pour un dépôt privé, et illimité pour un dépôt public.
+- **Poids du dépôt** : `ranking.json` pèse environ 540 Ko (64 Ko une fois
+  compressé par Netlify) et est réécrit à chaque analyse, soit de l'ordre de
+  30 Mo par an dans l'historique Git. Pour repartir à zéro si besoin :
+  `git rm --cached web/data/ranking.json` puis un nouveau commit.
+
+### Garde-fou
+
+Si une analyse renvoie moins de dix titres classés — panne de source, bridage
+généralisé — le workflow échoue volontairement **avant** de publier : la
+dernière analyse valide reste en ligne plutôt que d'être remplacée par un
+classement vide.
+
 ## Limites connues
 
 - **yfinance est une bibliothèque non officielle** qui interroge les points
@@ -338,9 +460,15 @@ src/investassist/
   storage.py       SQLite : historique, watchlist, règles et journal d'alertes
   alerts/          évaluation des règles, notification locale et SMTP
   ui/              composants Streamlit (dont la bannière d'avertissement)
-app.py             tableau de bord (5 vues)
-scripts/           validate_ticker.py, run_screening.py, scheduler.py
-tests/             58 tests hors ligne, fixtures figées
+  export.py        format JSON publie vers le site statique
+app.py             tableau de bord Streamlit local (5 vues)
+web/               site statique Netlify (HTML/CSS/JS sans dependance)
+  data/            donnees publiees par l'analyse planifiee
+netlify.toml       publication du dossier web/, en-tetes, fonction edge
+netlify/edge-functions/auth.ts   protection par mot de passe
+.github/workflows/analyse.yml    analyse planifiee et publication
+scripts/           validate_ticker.py, run_screening.py, build_site.py, scheduler.py
+tests/             108 tests hors ligne, fixtures figées
 ```
 
 ## Tests
@@ -349,12 +477,13 @@ tests/             58 tests hors ligne, fixtures figées
 python -m pytest tests/ -q
 ```
 
-83 tests, **aucun appel réseau** : fixtures EDGAR figées (dont un cas de
+108 tests, **aucun appel réseau** : fixtures EDGAR figées (dont un cas de
 comparatif retraité après division d'actions), cas limites des critères
 (base négative, EBITDA négatif, fonds propres négatifs, PEG non interprétable),
 règles d'exclusion, non-répétition des alertes, intégrité des univers,
-restauration du dernier classement depuis SQLite, et vérification que chaque
-vue de l'interface affiche l'avertissement de non-conseil.
+restauration du dernier classement depuis SQLite, format d'export du site,
+câblage du déploiement Netlify, et vérification que chaque vue de l'interface
+— locale comme publiée — affiche l'avertissement de non-conseil.
 
 ### Pièges vérifiés par des tests de non-régression
 

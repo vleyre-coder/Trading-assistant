@@ -1,0 +1,37 @@
+# =====================================================================
+# Configuration Netlify — site statique Investassist
+# ---------------------------------------------------------------------
+# Netlify ne calcule rien : il publie le contenu de web/, produit en amont
+# par l'analyse (GitHub Actions, voir .github/workflows/analyse.yml).
+# Aucune commande de build, donc aucune minute de build consommee.
+# =====================================================================
+
+[build]
+  publish = "web"
+  command = ""
+
+# Protection par mot de passe (fonction edge, disponible sans plan payant).
+# Le mot de passe se definit dans Netlify : Site settings > Environment
+# variables > SITE_PASSWORD. Sans cette variable, le site reste ouvert.
+[[edge_functions]]
+  path = "/*"
+  function = "auth"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    X-Robots-Tag = "noindex, nofollow"
+
+# Les donnees changent a chaque analyse : jamais servies depuis le cache.
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"

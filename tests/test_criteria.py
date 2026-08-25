@@ -28,12 +28,12 @@ def test_cagr_nominal():
 def test_cagr_refuse_base_negative():
     """Un TCAM sur base negative n'a pas de sens : il doit etre refuse."""
     value, reason = criteria.cagr([(2020, -50.0), (2025, 200.0)])
-    assert value is None and "negative" in reason
+    assert value is None and "négative" in reason
 
 
 def test_cagr_refuse_arrivee_negative():
     value, reason = criteria.cagr([(2020, 100.0), (2025, -20.0)])
-    assert value is None and "arrivee" in reason
+    assert value is None and "arrivée" in reason
 
 
 def test_cagr_un_seul_point():
@@ -73,7 +73,7 @@ def test_roe_ecarte_les_fonds_propres_negatifs():
     })
     value, detail, _ = criteria.roe_avg(fund)
     assert value == pytest.approx(0.15)
-    assert "ecartes" in detail and "2023" in detail
+    assert "écartés" in detail and "2023" in detail
 
 
 # ------------------------------------------------------------ bilan
@@ -81,13 +81,13 @@ def test_net_debt_to_ebitda_tresorerie_nette():
     fund = build({2025: {"total_debt": 100.0, "cash": 400.0, "ebitda": 200.0}})
     value, detail, _ = criteria.net_debt_to_ebitda(fund)
     assert value == pytest.approx(-1.5)
-    assert "tresorerie nette positive" in detail
+    assert "trésorerie nette positive" in detail
 
 
 def test_net_debt_to_ebitda_refuse_ebitda_negatif():
     fund = build({2025: {"total_debt": 100.0, "cash": 0.0, "ebitda": -50.0}})
     value, _, missing = criteria.net_debt_to_ebitda(fund)
-    assert value is None and "EBITDA negatif" in missing
+    assert value is None and "EBITDA négatif" in missing
 
 
 # -------------------------------------------------------------- PEG
@@ -99,7 +99,7 @@ def test_peg_refuse_croissance_negative():
         trailing_pe=15.0,
     )
     value, _, missing = criteria.peg_ratio(fund)
-    assert value is None and "negative ou nulle" in missing
+    assert value is None and "négative ou nulle" in missing
 
 
 def test_peg_refuse_pe_negatif():
@@ -134,7 +134,7 @@ def test_dividende_baisse_penalisee():
         2024: {"dividend_per_share": 1.1},
     })
     value, detail, _ = criteria.dividend_growth_streak(fund)
-    assert "baisse constatee" in detail
+    assert "baisse constatée" in detail
     assert 0.0 <= value <= 1.0
 
 
@@ -149,8 +149,8 @@ def test_annee_civile_en_cours_exclue_du_dividende():
         current: {"dividend_per_share": 0.3},  # trimestre unique deja verse
     })
     value, detail, _ = criteria.dividend_growth_streak(fund)
-    assert "baisse constatee" not in detail
-    assert f"annee {current} en cours" in detail
+    assert "baisse constatée" not in detail
+    assert f"année {current} en cours" in detail
     assert value > 0.5
 
 
