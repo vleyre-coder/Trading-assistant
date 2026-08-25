@@ -295,6 +295,23 @@ GitHub Actions (nuit)          dépôt GitHub              Netlify
 Netlify ne construit rien (`command = ""`) : il publie le dossier `web/` tel
 quel. **Aucune minute de build Netlify n'est consommée.**
 
+### Deux emplacements de configuration à ne pas confondre
+
+Les réglages se répartissent entre **deux services distincts**, parce que le
+calcul et l'affichage sont assurés par deux services différents :
+
+| Service | Variables à y définir | Pourquoi là |
+|---|---|---|
+| **GitHub** (*Settings → Secrets and variables → Actions*) | `SEC_USER_AGENT` et les secrets SMTP | C'est GitHub Actions qui **exécute l'analyse Python** et envoie les alertes |
+| **Netlify** (*Site configuration → Environment variables*) | `SITE_PASSWORD` uniquement | C'est Netlify qui **sert la page** et doit en contrôler l'accès |
+
+Netlify n'exécute aucun code Python dans ce montage : il publie des fichiers
+déjà calculés. Il n'a donc pas besoin de connaître votre adresse SEC ni votre
+mot de passe SMTP — et il vaut mieux qu'il ne les ait pas.
+
+Sans alertes email, il n'y a que **deux valeurs à saisir en tout** :
+`SEC_USER_AGENT` côté GitHub, `SITE_PASSWORD` côté Netlify.
+
 ### Mise en place, une seule fois
 
 **1. Connecter le dépôt à Netlify**
@@ -310,9 +327,10 @@ nom `SITE_PASSWORD`, valeur au choix. La fonction edge
 accessible à quiconque connaît l'URL** — c'est un choix délibéré pour ne pas
 rendre le site inaccessible par simple oubli, mais pensez à la définir.
 
-**3. Renseigner les secrets GitHub**
-Dépôt GitHub : *Settings → Secrets and variables → Actions → New repository
-secret*.
+**3. Renseigner les secrets GitHub** *(côté GitHub, pas Netlify)*
+Dépôt GitHub → onglet **Settings** du dépôt (celui de la barre supérieure du
+dépôt, à ne pas confondre avec les réglages de votre compte) → menu de gauche
+**Secrets and variables → Actions** → **New repository secret**.
 
 | Secret | Rôle | Obligatoire |
 |---|---|---|
