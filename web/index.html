@@ -4,58 +4,103 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Investassist — classement fondamental</title>
+<meta name="color-scheme" content="light dark">
+<title>Investassist · Analyse fondamentale</title>
 <link rel="stylesheet" href="assets/styles.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📊</text></svg>">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cg fill='%23fff'%3E%3Crect x='8' y='17' width='4' height='8' rx='1.5'/%3E%3Crect x='14' y='12' width='4' height='13' rx='1.5'/%3E%3Crect x='20' y='7' width='4' height='18' rx='1.5'/%3E%3C/g%3E%3C/svg%3E">
 </head>
 <body>
-<div class="enveloppe">
 
-  <header class="principal">
-    <h1>Investassist</h1>
-    <p class="sous-titre">
-      Classement d'adéquation aux critères fondamentaux —
-      <span id="horodatage">chargement…</span>
-    </p>
-  </header>
+<a class="saut-contenu" href="#contenu">Aller au contenu principal</a>
 
-  <!-- Avertissement de non-conseil : affiché sur tous les onglets, non
-       masquable. Le texte provient des données publiées, de sorte qu'il ne
-       puisse pas diverger de celui du moteur d'analyse. -->
-  <div class="avertissement" role="note">
-    <strong>⚠️ <span id="avertissement-principal">Classement calculé à partir de données fondamentales
-    historiques et actuelles. Ne constitue pas un conseil en investissement ni une prédiction de
-    performance future.</span></strong>
-    <details>
-      <summary>Ce que ce classement mesure — et ce qu'il ne mesure pas</summary>
-      <p><strong>Ce que c'est.</strong> <span id="avertissement-est"></span></p>
-      <p><strong>Ce que ce n'est pas.</strong> <span id="avertissement-nest-pas"></span></p>
-      <p><strong>Limites des données.</strong> <span id="avertissement-donnees"></span></p>
-    </details>
+<header class="barre-app">
+  <div class="barre-interieur">
+
+    <div class="marque">
+      <svg class="marque-logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="currentColor"/>
+        <g fill="#fff">
+          <rect x="8" y="17" width="4" height="8" rx="1.5"/>
+          <rect x="14" y="12" width="4" height="13" rx="1.5"/>
+          <rect x="20" y="7" width="4" height="18" rx="1.5"/>
+        </g>
+      </svg>
+      <span class="marque-texte">
+        <span class="marque-nom">Investassist</span>
+        <span class="marque-baseline">Analyse fondamentale</span>
+      </span>
+    </div>
+
+    <nav class="onglets" role="tablist" aria-label="Sections">
+      <button role="tab" data-vue="classement" aria-selected="true">Classement</button>
+      <button role="tab" data-vue="watchlist" aria-selected="false">Watchlist</button>
+      <button role="tab" data-vue="exclus" aria-selected="false">Non classés</button>
+      <button role="tab" data-vue="methodologie" aria-selected="false">Méthodologie</button>
+    </nav>
+
+    <div class="barre-actions">
+      <span class="jeton-maj" id="horodatage" title="Date de la dernière analyse">
+        <span class="point"></span>chargement…
+      </span>
+      <button class="bouton-icone" id="bascule-theme" type="button"
+              aria-label="Changer de thème" title="Thème : automatique">
+        <svg viewBox="0 0 20 20" aria-hidden="true" width="17" height="17">
+          <path d="M10 3.2a6.8 6.8 0 1 0 6.8 6.8A5.4 5.4 0 0 1 10 3.2Z"
+                fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
   </div>
+</header>
 
-  <nav class="onglets" role="tablist">
-    <button role="tab" data-vue="classement" aria-selected="true">Classement</button>
-    <button role="tab" data-vue="watchlist" aria-selected="false">Ma watchlist</button>
-    <button role="tab" data-vue="exclus" aria-selected="false">Titres non classés</button>
-    <button role="tab" data-vue="methodologie" aria-selected="false">Méthodologie</button>
-  </nav>
-
-  <main id="contenu">
-    <div class="carte"><p class="vide">Chargement des données…</p></div>
-  </main>
-
-  <footer class="principal">
-    <p id="pied-avertissement">⚠️ Classement calculé à partir de données fondamentales historiques et
-    actuelles. Ne constitue pas un conseil en investissement ni une prédiction de performance future.</p>
-    <p class="note-discrete">
-      Outil personnel — aucune diffusion à des tiers. Données non auditées, issues de sources
-      gratuites (Yahoo Finance via yfinance, SEC EDGAR). Analyse recalculée automatiquement ;
-      cette page ne réalise aucun calcul et ne transmet aucune donnée.
-    </p>
-  </footer>
-
+<!-- Avertissement de non-conseil : present dans le HTML servi, sur toutes
+     les sections. Le texte est remplace par celui des donnees publiees, de
+     sorte qu'il ne puisse jamais diverger de celui du moteur d'analyse. -->
+<div class="bandeau-avertissement">
+  <div class="bandeau-interieur">
+    <svg class="bandeau-icone" viewBox="0 0 20 20" aria-hidden="true" width="18" height="18">
+      <path d="M10 2.6 18.2 17H1.8L10 2.6Z" fill="none" stroke="currentColor" stroke-width="1.6"
+            stroke-linejoin="round"/>
+      <path d="M10 8v3.6M10 14.1v.1" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round"/>
+    </svg>
+    <div class="bandeau-texte">
+      <p id="avertissement-principal">Classement calculé à partir de données fondamentales
+      historiques et actuelles. Ne constitue pas un conseil en investissement ni une prédiction
+      de performance future.</p>
+      <details>
+        <summary>Ce que ce classement mesure — et ce qu'il ne mesure pas</summary>
+        <div class="bandeau-detail">
+          <p><strong>Ce que c'est.</strong> <span id="avertissement-est"></span></p>
+          <p><strong>Ce que ce n'est pas.</strong> <span id="avertissement-nest-pas"></span></p>
+          <p><strong>Limites des données.</strong> <span id="avertissement-donnees"></span></p>
+        </div>
+      </details>
+    </div>
+  </div>
 </div>
+
+<main class="enveloppe" id="contenu">
+  <section class="carte">
+    <p class="etat-vide">Chargement des données…</p>
+  </section>
+</main>
+
+<footer class="pied">
+  <div class="enveloppe">
+    <p class="pied-avertissement" id="pied-avertissement">
+      Classement calculé à partir de données fondamentales historiques et actuelles.
+      Ne constitue pas un conseil en investissement ni une prédiction de performance future.
+    </p>
+    <p class="pied-note">
+      Outil personnel — aucune diffusion à des tiers. Données non auditées, issues de sources
+      gratuites (Yahoo Finance via yfinance, SEC EDGAR). Cette page ne réalise aucun calcul
+      et ne transmet aucune donnée.
+    </p>
+  </div>
+</footer>
+
 <script src="assets/app.js"></script>
 </body>
 </html>

@@ -7,6 +7,9 @@
   "use strict";
 
   const CLE_WATCHLIST = "investassist.watchlist";
+  const CLE_THEME = "investassist.theme";
+  const THEMES = ["auto", "light", "dark"];
+  const LIBELLE_THEME = { auto: "automatique", light: "clair", dark: "sombre" };
   const etat = {
     donnees: null,
     historique: null,
@@ -39,6 +42,49 @@
     if (unite === "percent") return `${nombre(valeur * 100, 1)} %`;
     if (unite === "pp") return `${valeur >= 0 ? "+" : ""}${nombre(valeur * 100, 1)} pts`;
     return nombre(valeur, 2);
+  }
+
+  /** « il y a 3 h », « hier », « le 12 août » : repere plus parlant qu'une
+      date brute pour juger de la fraicheur d'une analyse. */
+  function delaiLisible(iso) {
+    const quand = new Date(iso);
+    if (Number.isNaN(quand.getTime())) return iso;
+    const minutes = Math.round((Date.now() - quand.getTime()) / 60000);
+    if (minutes < 2) return "à l'instant";
+    if (minutes < 60) return `il y a ${minutes} min`;
+    const heures = Math.round(minutes / 60);
+    if (heures < 24) return `il y a ${heures} h`;
+    const jours = Math.round(heures / 24);
+    if (jours === 1) return "hier";
+    if (jours < 7) return `il y a ${jours} jours`;
+    return quand.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+  }
+
+  function majHorodatage(iso) {
+    const jeton = $("#horodatage");
+    jeton.innerHTML = "";
+    jeton.append(creer("span", "point"), creer("span", null, `Analyse ${delaiLisible(iso)}`));
+    jeton.title = `Dernière analyse : ${dateLisible(iso)}`;
+  }
+
+  function themeActuel() {
+    try {
+      return localStorage.getItem(CLE_THEME) || "auto";
+    } catch (erreur) {
+      return "auto";
+    }
+  }
+
+  function appliquerTheme(theme) {
+    if (theme === "auto") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    const bouton = $("#bascule-theme");
+    if (bouton) bouton.title = `Thème : ${LIBELLE_THEME[theme]}`;
+    try {
+      localStorage.setItem(CLE_THEME, theme);
+    } catch (erreur) {
+      /* stockage indisponible : le theme vaut pour la session seulement */
+    }
   }
 
   const dateLisible = (iso) => {
@@ -91,11 +137,11 @@
       etat.donnees = classement;
       etat.historique = historique;
       appliquerAvertissements(classement.disclaimer || {});
-      $("#horodatage").textContent = `analyse du ${dateLisible(classement.generated_at)}`;
+      majHorodatage(classement.generated_at);
       rendre();
     } catch (erreur) {
       $("#contenu").innerHTML = "";
-      const carte = creer("div", "carte");
+      const carte = creer("section", "carte");
       carte.append(creer("h2", null, "Données indisponibles"));
       carte.append(
         creer(
@@ -140,29 +186,35 @@
   /* ------------------------------------------------------- classement */
   function vueClassement(racine) {
     const donnees = etat.donnees;
-    const carte = creer("div", "carte");
-    carte.append(creer("h2", null, "Classement par adéquation aux critères fondamentaux"));
-    carte.append(
+    const carte = creer("section", "carte");
+
+    const entete = creer("div", "carte-entete");
+    const titres = creer("div");
+    titres.append(creer("h2", null, "Classement par adéquation aux critères fondamentaux"));
+    titres.append(
       creer(
         "p",
         "note",
-        `Univers analysé : ${(donnees.universes || []).join(", ")} — ` +
-          `${donnees.counts.ranked} titres classés, ${donnees.counts.excluded} exclus pour ` +
-          `données incomplètes, ${donnees.counts.failed} non récupérés.`
+        `Univers : ${(donnees.universes || []).join(", ")} · ` +
+          `${donnees.counts.ranked} titres classés · ${donnees.counts.excluded} écartés pour ` +
+          `données incomplètes · ${donnees.counts.failed} non récupérés`
       )
     );
+    entete.append(titres);
+    carte.append(entete);
 
     const indicateurs = creer("div", "indicateurs");
     const premier = donnees.ranked[0];
     if (premier) {
       indicateurs.append(
-        indicateur(premier.ticker, "Rang n°1 sur ces critères"),
+        indicateur(premier.ticker, "Rang n°1 sur ces critères", true),
         indicateur(nombre(premier.composite, 1), "Meilleur score /100")
       );
     }
     indicateurs.append(
       indicateur(String(donnees.counts.ranked), "Titres classés"),
-      indicateur(String(donnees.counts.excluded), "Données incomplètes")
+      indicateur(String(donnees.counts.excluded), "Données incomplètes"),
+      indicateur(`${donnees.methodology.target_years} ans`, "Fenêtre visée")
     );
     carte.append(indicateurs);
 
@@ -170,16 +222,16 @@
       carte.append(
         creer(
           "p",
-          "note",
+          "note-discrete",
           `${premier.ticker} est classé n°1 sur les critères fondamentaux retenus — ` +
-            `détail ci-dessous. Ce rang n'indique ni le moment ni la certitude ` +
-            `d'une évolution de cours.`
+            `détail en cliquant sur le titre. Ce rang n'indique ni le moment ni la ` +
+            `certitude d'une évolution de cours.`
         )
       );
     }
     racine.append(carte);
 
-    const carteTable = creer("div", "carte");
+    const carteTable = creer("section", "carte");
     carteTable.append(filtres());
     const zone = creer("div", "zone-tableau");
     zone.append(tableauClassement());
@@ -192,29 +244,48 @@
     }
   }
 
-  function indicateur(valeur, libelle) {
-    const noeud = creer("div", "indicateur");
-    noeud.append(creer("div", "valeur", valeur), creer("div", "libelle", libelle));
+  /** Tuile de synthese : le libelle precede la valeur, comme dans un
+      tableau de bord — l'oeil lit d'abord de quoi il s'agit. */
+  function indicateur(valeur, libelle, accent = false) {
+    const noeud = creer("div", "indicateur" + (accent ? " accent" : ""));
+    noeud.append(creer("div", "libelle", libelle), creer("div", "valeur", valeur));
     return noeud;
   }
 
   function filtres() {
     const barre = creer("div", "filtres");
 
+    const boite = creer("div", "champ-recherche");
+    const loupe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    loupe.setAttribute("viewBox", "0 0 16 16");
+    loupe.setAttribute("width", "15");
+    loupe.setAttribute("height", "15");
+    loupe.setAttribute("aria-hidden", "true");
+    const trace = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    trace.setAttribute("d", "M7 1.8a5.2 5.2 0 1 1 0 10.4A5.2 5.2 0 0 1 7 1.8Zm3.9 9.1 3.3 3.3");
+    trace.setAttribute("fill", "none");
+    trace.setAttribute("stroke", "currentColor");
+    trace.setAttribute("stroke-width", "1.5");
+    trace.setAttribute("stroke-linecap", "round");
+    loupe.append(trace);
+    boite.append(loupe);
+
     const recherche = creer("input");
     recherche.type = "search";
     recherche.placeholder = "Rechercher un ticker ou un nom…";
+    recherche.setAttribute("aria-label", "Rechercher un titre");
     recherche.value = etat.filtres.recherche;
     recherche.addEventListener("input", (evenement) => {
       etat.filtres.recherche = evenement.target.value;
       rendre();
-      const champ = document.querySelector('.filtres input[type="search"]');
+      const champ = document.querySelector(".champ-recherche input");
       if (champ) {
         champ.focus();
         champ.setSelectionRange(champ.value.length, champ.value.length);
       }
     });
-    barre.append(recherche);
+    boite.append(recherche);
+    barre.append(boite);
 
     barre.append(
       selecteur(
@@ -231,7 +302,15 @@
       )
     );
 
-    barre.append(creer("span", "compteur", `${lignesFiltrees().length} titres affichés`));
+    const total = etat.donnees.ranked.length;
+    const affiches = lignesFiltrees().length;
+    barre.append(
+      creer(
+        "span",
+        "compteur",
+        affiches === total ? `${total} titres` : `${affiches} sur ${total} titres`
+      )
+    );
     return barre;
   }
 
@@ -298,7 +377,8 @@
       { cle: "name", libelle: "Nom" },
       { cle: "sector", libelle: "Secteur" },
       { cle: "region", libelle: "Zone" },
-      { cle: "composite", libelle: "Score", num: true, jauge: true },
+      { cle: "composite", libelle: "Score", num: true },
+      { cle: "tendance", libelle: "Tendance", num: false, triable: false },
       { cle: "growth", libelle: "Croissance", num: true },
       { cle: "valuation", libelle: "Valorisation", num: true },
       { cle: "profitability", libelle: "Rentabilité", num: true },
@@ -315,11 +395,15 @@
       if (etat.tri.colonne === colonne.cle) {
         cellule.append(creer("span", "fleche", etat.tri.ordre === 1 ? "▲" : "▼"));
       }
-      cellule.addEventListener("click", () => {
-        if (etat.tri.colonne === colonne.cle) etat.tri.ordre *= -1;
-        else etat.tri = { colonne: colonne.cle, ordre: colonne.cle === "rank" ? 1 : -1 };
-        rendre();
-      });
+      if (colonne.triable === false) {
+        cellule.classList.add("non-triable");
+      } else {
+        cellule.addEventListener("click", () => {
+          if (etat.tri.colonne === colonne.cle) etat.tri.ordre *= -1;
+          else etat.tri = { colonne: colonne.cle, ordre: colonne.cle === "rank" ? 1 : -1 };
+          rendre();
+        });
+      }
       entete.append(cellule);
     });
     const thead = creer("thead");
@@ -331,7 +415,13 @@
       const ligne = creer("tr");
       if (etat.selection === titre.ticker) ligne.classList.add("selectionnee");
 
-      ligne.append(cellule(String(titre.rank), "num"));
+      // Le rang est toujours ecrit en clair ; la pastille des trois premiers
+      // n'ajoute aucune information, elle ne fait que la mettre en avant.
+      const celluleRang = creer("td", "num");
+      celluleRang.append(
+        creer("span", "rang" + (titre.rank <= 3 ? " podium" : ""), String(titre.rank))
+      );
+      ligne.append(celluleRang);
 
       const celluleTicker = creer("td", "ticker");
       const lien = creer("a", "lien-titre", titre.ticker);
@@ -346,18 +436,21 @@
       celluleTicker.append(lien);
       ligne.append(celluleTicker);
 
-      ligne.append(cellule(titre.name || "—"));
-      ligne.append(cellule(titre.sector || "—"));
-      ligne.append(cellule(titre.region || "—"));
+      const celluleNom = cellule(titre.name || "—", "nom");
+      celluleNom.title = titre.name || "";
+      ligne.append(celluleNom);
+      ligne.append(cellule(titre.sector || "—", "secondaire"));
+      ligne.append(cellule(titre.region || "—", "secondaire"));
       ligne.append(celluleScore(titre.composite));
+      ligne.append(celluleTendance(titre.ticker));
 
       ["growth", "valuation", "profitability", "balance_sheet", "dividend"].forEach((cle) => {
         const pilier = titre.pillars[cle];
         ligne.append(cellule(pilier && pilier.score !== null ? nombre(pilier.score, 1) : "n/d", "num"));
       });
 
-      ligne.append(cellule(`${titre.window_years} ans`, "num"));
-      ligne.append(cellule(`${Math.round(titre.coverage * 100)} %`, "num"));
+      ligne.append(cellule(`${titre.window_years} ans`, "num secondaire"));
+      ligne.append(cellule(`${Math.round(titre.coverage * 100)} %`, "num secondaire"));
       corps.append(ligne);
     });
     table.append(corps);
@@ -380,6 +473,45 @@
     return td;
   }
 
+  /**
+   * Micro-courbe d'evolution du score, sans axe ni etiquette : elle sert a
+   * reperer une tendance d'un coup d'oeil, la valeur exacte restant lisible
+   * dans la colonne Score et dans le graphique detaille.
+   */
+  function celluleTendance(ticker) {
+    const td = creer("td");
+    const serie = serieHistorique(ticker).slice(-14);
+    if (serie.length < 3) {
+      td.append(creer("span", "note-discrete", "—"));
+      return td;
+    }
+    const scores = serie.map((point) => point.score);
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    const etendue = max - min || 1;
+    const largeur = 62;
+    const hauteur = 20;
+    const chemin = scores
+      .map((score, index) => {
+        const x = (index / (scores.length - 1)) * (largeur - 3) + 1.5;
+        const y = hauteur - 3 - ((score - min) / etendue) * (hauteur - 6);
+        return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "tendance");
+    svg.setAttribute("viewBox", `0 0 ${largeur} ${hauteur}`);
+    svg.setAttribute("aria-label",
+      `Tendance du score sur ${serie.length} analyses : de ${nombre(scores[0], 1)} à ` +
+      `${nombre(scores[scores.length - 1], 1)}.`);
+    const trace = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    trace.setAttribute("d", chemin);
+    svg.append(trace);
+    td.append(svg);
+    return td;
+  }
+
   /* ----------------------------------------------------------- detail */
   function trouverTitre(ticker) {
     const donnees = etat.donnees;
@@ -391,19 +523,21 @@
   }
 
   function carteDetail(titre) {
-    const carte = creer("div", "carte");
+    const carte = creer("section", "carte");
     carte.id = "detail-titre";
 
-    const entete = creer("div", "filtres");
+    // ---- en-tete : identite du titre et action watchlist ----------------
+    const entete = creer("div", "carte-entete");
     const bloc = creer("div");
     bloc.append(creer("h2", null, `${titre.name || titre.ticker} (${titre.ticker})`));
+    const meta = [titre.sector, titre.region].filter(Boolean).join(" · ");
     bloc.append(
       creer(
         "p",
         "note",
-        titre.rank
+        (titre.rank
           ? `Classé n°${titre.rank} sur les critères fondamentaux retenus — voici pourquoi.`
-          : "Titre non classé : voir le motif ci-dessous."
+          : "Titre non classé : voir le motif ci-dessous.") + (meta ? `  ${meta}` : "")
       )
     );
     entete.append(bloc);
@@ -411,7 +545,7 @@
     const bouton = creer(
       "button",
       "bouton" + (estSuivi(titre.ticker) ? "" : " principal"),
-      estSuivi(titre.ticker) ? "★ Retirer de ma watchlist" : "☆ Ajouter à ma watchlist"
+      estSuivi(titre.ticker) ? "★ Retirer de la watchlist" : "☆ Suivre ce titre"
     );
     bouton.style.marginLeft = "auto";
     bouton.addEventListener("click", () => {
@@ -421,48 +555,68 @@
     entete.append(bouton);
     carte.append(entete);
 
+    // ---- chiffres cles --------------------------------------------------
     const indicateurs = creer("div", "indicateurs");
     indicateurs.append(
-      indicateur(titre.composite === null ? "n/d" : nombre(titre.composite, 1), "Score composite /100"),
-      indicateur(`${titre.window_years} ans`, "Fenêtre d'analyse"),
-      indicateur(`${Math.round(titre.coverage * 100)} %`, "Couverture des critères"),
+      indicateur(
+        titre.composite === null ? "n/d" : nombre(titre.composite, 1),
+        "Score composite /100",
+        true
+      ),
       indicateur(
         titre.price === null || titre.price === undefined
           ? "n/d"
           : `${nombre(titre.price, 2)} ${titre.currency || ""}`,
         "Cours à l'analyse"
-      )
+      ),
+      indicateur(`${titre.window_years} ans`, "Fenêtre d'analyse"),
+      indicateur(`${Math.round(titre.coverage * 100)} %`, "Couverture des critères")
     );
     carte.append(indicateurs);
 
     if (titre.window_years < 5) {
       carte.append(
-        etiquetteInfo(
+        encart(
           "attention",
           "⚠",
-          `Fenêtre de ${titre.window_years} ans : historique gratuit plus court pour ce titre ` +
-            `(fréquent hors États-Unis). Un TCAM sur ${titre.window_years} ans n'est pas ` +
-            `strictement comparable à un TCAM sur 5 ans.`
+          `Fenêtre de ${titre.window_years} ans : l'historique fondamental gratuit est plus ` +
+            `court pour ce titre (fréquent hors États-Unis). Un TCAM sur ` +
+            `${titre.window_years} ans n'est pas strictement comparable à un TCAM sur 5 ans.`
         )
       );
     }
     if (!titre.ranked && titre.exclusion_reason) {
-      carte.append(etiquetteInfo("probleme", "✕", titre.exclusion_reason));
+      carte.append(encart("probleme", "✕", titre.exclusion_reason));
     }
     (titre.warnings || []).forEach((message) => {
       carte.append(creer("p", "note-discrete", `ℹ️ ${message}`));
     });
 
-    carte.append(creer("h3", null, "Sous-scores par pilier"));
-    Object.entries(titre.pillars).forEach(([, pilier]) => {
-      carte.append(barrePilier(pilier));
-    });
+    // ---- deux colonnes : le detail a gauche, la synthese a droite -------
+    const grille = creer("div", "detail-grille");
 
-    carte.append(creer("h3", null, "Détail critère par critère"));
+    const colonneCriteres = creer("div");
+    colonneCriteres.append(creer("h3", null, "Détail critère par critère"));
     Object.entries(titre.pillars).forEach(([, pilier]) => {
-      pilier.criteria.forEach((critere) => carte.append(blocCritere(critere, pilier.label)));
+      pilier.criteria.forEach((critere) => colonneCriteres.append(blocCritere(critere, pilier.label)));
     });
+    grille.append(colonneCriteres);
 
+    const panneau = creer("aside", "panneau");
+    panneau.append(creer("h3", null, "Sous-scores par pilier"));
+    Object.entries(titre.pillars).forEach(([, pilier]) => panneau.append(barrePilier(pilier)));
+    panneau.append(
+      creer(
+        "p",
+        "note-discrete",
+        "Chaque pilier est une moyenne pondérée de ses critères ; le poids indiqué est " +
+          "celui qu'il occupe dans le score composite."
+      )
+    );
+    grille.append(panneau);
+    carte.append(grille);
+
+    // ---- evolution du score ---------------------------------------------
     const serie = serieHistorique(titre.ticker);
     if (serie.length >= 2) {
       carte.append(creer("h3", null, "Évolution du score composite"));
@@ -479,25 +633,23 @@
     return carte;
   }
 
-  function etiquetteInfo(classe, icone, texte) {
-    const paragraphe = creer("p", "note");
-    const badge = creer("span", `etiquette ${classe}`);
-    badge.append(creer("span", null, icone), creer("span", null, texte));
-    paragraphe.append(badge);
-    return paragraphe;
+  function encart(classe, icone, texte) {
+    const noeud = creer("div", `encart ${classe}`);
+    noeud.append(creer("span", "icone", icone), creer("span", null, texte));
+    return noeud;
   }
 
   function barrePilier(pilier) {
-    const ligne = creer("div", "barre-pilier");
-    ligne.append(creer("div", "nom", `${pilier.label} (${Math.round(pilier.weight * 100)} %)`));
+    const ligne = creer("div", "barre-pilier" + (pilier.score === null ? " neutre" : ""));
+    ligne.append(creer("div", "nom", `${pilier.label} · ${Math.round(pilier.weight * 100)} %`));
+    ligne.append(
+      creer("div", "valeur", pilier.score === null ? "n/d" : nombre(pilier.score, 0))
+    );
     const piste = creer("div", "barre-piste");
     const remplissage = creer("span");
     remplissage.style.width = `${Math.max(0, Math.min(100, pilier.score || 0))}%`;
     piste.append(remplissage);
     ligne.append(piste);
-    ligne.append(
-      creer("div", "valeur", pilier.score === null ? "n/d" : nombre(pilier.score, 0))
-    );
     return ligne;
   }
 
@@ -507,7 +659,7 @@
     entete.append(creer("span", "titre", critere.label));
     entete.append(creer("span", "etiquette", libellePilier));
     entete.append(
-      creer("span", "chiffre", `${valeurCritere(critere.value, critere.unit)}`)
+      creer("span", "chiffre principal", `${valeurCritere(critere.value, critere.unit)}`)
     );
     entete.append(
       creer(
@@ -678,7 +830,7 @@
 
   /* -------------------------------------------------------- watchlist */
   function vueWatchlist(racine) {
-    const carte = creer("div", "carte");
+    const carte = creer("section", "carte");
     carte.append(creer("h2", null, "Ma watchlist"));
     carte.append(
       creer(
@@ -691,7 +843,7 @@
 
     const suivis = lireWatchlist();
     if (!suivis.length) {
-      carte.append(creer("p", "vide", "Aucun titre suivi pour le moment."));
+      carte.append(creer("p", "etat-vide", "Aucun titre suivi pour le moment."));
       racine.append(carte);
       return;
     }
@@ -756,7 +908,7 @@
   function vueExclus(racine) {
     const donnees = etat.donnees;
 
-    const carte = creer("div", "carte");
+    const carte = creer("section", "carte");
     carte.append(creer("h2", null, "Titres non classés"));
     carte.append(
       creer(
@@ -802,11 +954,11 @@
       zone.append(table);
       carte.append(zone);
     } else {
-      carte.append(creer("p", "vide", "Aucun titre exclu lors de cette analyse."));
+      carte.append(creer("p", "etat-vide", "Aucun titre exclu lors de cette analyse."));
     }
     racine.append(carte);
 
-    const carteEchecs = creer("div", "carte");
+    const carteEchecs = creer("section", "carte");
     carteEchecs.append(creer("h2", null, "Échecs de récupération"));
     carteEchecs.append(
       creer(
@@ -823,7 +975,7 @@
       });
       carteEchecs.append(liste);
     } else {
-      carteEchecs.append(creer("p", "vide", "Aucun échec lors de cette analyse."));
+      carteEchecs.append(creer("p", "etat-vide", "Aucun échec lors de cette analyse."));
     }
     racine.append(carteEchecs);
   }
@@ -833,7 +985,7 @@
     const methode = etat.donnees.methodology || {};
     const avertissement = etat.donnees.disclaimer || {};
 
-    const carte = creer("div", "carte");
+    const carte = creer("section", "carte");
     carte.append(creer("h2", null, "Méthodologie"));
     carte.append(creer("p", "note", avertissement.what_this_is || ""));
 
@@ -904,6 +1056,15 @@
   }
 
   /* ------------------------------------------------------------ demarrage */
+  appliquerTheme(themeActuel());
+  const boutonTheme = $("#bascule-theme");
+  if (boutonTheme) {
+    boutonTheme.addEventListener("click", () => {
+      const suivant = THEMES[(THEMES.indexOf(themeActuel()) + 1) % THEMES.length];
+      appliquerTheme(suivant);
+    });
+  }
+
   document.querySelectorAll("nav.onglets button").forEach((bouton) => {
     bouton.addEventListener("click", () => {
       etat.vue = bouton.dataset.vue;
