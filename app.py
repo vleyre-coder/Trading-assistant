@@ -8,6 +8,7 @@ fondamentaux objectifs, au moment du calcul.
 """
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -30,8 +31,8 @@ from investassist.config import (  # noqa: E402
 )
 from investassist.disclaimers import MAIN_HTML, ranking_phrasing  # noqa: E402
 from investassist.fundamentals import FundamentalsService  # noqa: E402
-from investassist.screener import Screener, tickers_for  # noqa: E402
-from investassist.storage import ALERT_KINDS, Database  # noqa: E402
+from investassist.screener import ScreeningResult, Screener, tickers_for  # noqa: E402
+from investassist.storage import ALERT_KINDS, Database, score_from_row  # noqa: E402
 from investassist.ui import components as ui  # noqa: E402
 
 st.set_page_config(page_title="Investassist — analyse fondamentale", page_icon="📊", layout="wide")
@@ -58,6 +59,39 @@ def get_context():
 
 
 settings, config, db, service, screener = get_context()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def verifier_ticker(ticker: str) -> tuple[bool, str]:
+    """Le ticker existe-t-il chez le fournisseur de donnees ?
+
+    Evite qu'une faute de frappe (« AIRPA » au lieu de « AIR.PA ») cree
+    silencieusement une watchlist ou une alerte qui ne se declenchera jamais.
+    """
+    snapshot = service.yahoo.snapshot(ticker)
+    if snapshot is None or snapshot.price is None:
+        return False, (
+            f"Ticker « {ticker} » introuvable. Vérifiez le suffixe de place : "
+            "AIR.PA (Paris), SAP.DE (Francfort), ASML.AS (Amsterdam), "
+            "NESN.SW (Suisse), MSFT (États-Unis, sans suffixe)."
+        )
+    return True, snapshot.name or ticker
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def charger_titre(ticker: str, medianes: tuple[tuple[str, float], ...], fenetre: int):
+    """Charge et note un titre, avec mise en cache de 15 minutes.
+
+    Streamlit re-execute tout le script a chaque interaction : sans ce cache,
+    ouvrir un menu deroulant relancait la lecture et l'analyse complete des
+    etats financiers (plusieurs Mo de JSON EDGAR a reparser).
+    """
+    fundamentals = service.load(ticker, target_years=fenetre)
+    prices = service.price_history(ticker, period="5y")
+    score = scoring.score_stock(
+        fundamentals, config, prices=prices, sector_medians=dict(medianes)
+    )
+    return fundamentals, prices, score
 
 
 def run_screening(universes: list[str], use_cache: bool) -> None:
@@ -87,6 +121,7 @@ def run_screening(universes: list[str], use_cache: bool) -> None:
     st.session_state["result"] = result
     st.session_state["result_at"] = datetime.now()
     st.session_state["last_events"] = events
+    st.session_state["result_restaure"] = False
 
 
 # ------------------------------------------------------------------ barre laterale
@@ -109,7 +144,13 @@ selected = st.sidebar.multiselect(
     format_func=lambda k: catalogue["universes"][k].get("label", k),
 )
 n_tickers = len(tickers_for(selected))
-st.sidebar.caption(f"{n_tickers} titres sélectionnés")
+# Mesure observee : environ 3,5 s par titre sans cache, 4 requetes en
+# parallele. Annoncer l'ordre de grandeur evite de croire l'outil bloque.
+duree_estimee = max(1, round(n_tickers * 3.5 / 60))
+st.sidebar.caption(
+    f"{n_tickers} titres sélectionnés — environ {duree_estimee} min "
+    "pour une analyse complète sans cache"
+)
 
 use_cache = st.sidebar.checkbox(
     "Utiliser le cache local",
@@ -124,6 +165,42 @@ if st.sidebar.button("🔄 Relancer l'analyse maintenant", type="primary", use_c
         st.sidebar.error("Sélectionnez au moins un univers.")
     else:
         run_screening(selected, use_cache)
+
+if "exemple.fr" in settings.sec_user_agent:
+    st.sidebar.warning(
+        "Identification SEC non renseignée : les données officielles "
+        "américaines (5 ans d'historique) risquent d'être refusées. "
+        f"Renseignez `sec.user_agent` dans {CONFIG_DIR / 'settings.yaml'}."
+    )
+
+def restaurer_derniere_analyse() -> None:
+    """Affiche le dernier classement enregistre des l'ouverture.
+
+    Sans cela, l'utilisateur qui ouvre l'application le matin apres une
+    execution planifiee la nuit voit un ecran vide et doit tout relancer.
+    """
+    if "result" in st.session_state:
+        return
+    dernier = db.last_run()
+    if dernier is None:
+        return
+    lignes = db.scores_for_run(dernier["id"])
+    if not lignes:
+        return
+    scores = [score_from_row(ligne) for ligne in lignes]
+    st.session_state["result"] = ScreeningResult(
+        scores=scores,
+        ranked=scoring.rank(scores),
+        excluded=scoring.excluded(scores),
+        sector_medians=json.loads(dernier["sector_medians_json"] or "{}"),
+        run_id=dernier["id"],
+        universes=(dernier["universes"] or "").split(","),
+    )
+    st.session_state["result_at"] = datetime.fromisoformat(dernier["finished_at"])
+    st.session_state["result_restaure"] = True
+
+
+restaurer_derniere_analyse()
 
 last_run = db.last_run()
 if last_run:
@@ -147,10 +224,17 @@ def view_ranking() -> None:
         )
         return
 
+    if st.session_state.get("result_restaure"):
+        st.caption(
+            "Classement restauré depuis la dernière analyse enregistrée localement. "
+            "Les cours et les fondamentaux datent de cette exécution : relancez "
+            "l'analyse pour les rafraîchir."
+        )
     st.caption(
         f"Analyse du {st.session_state['result_at']:%d/%m/%Y à %H:%M} — "
         f"{len(result.ranked)} titres classés, {len(result.excluded)} exclus pour données "
-        f"incomplètes, {len(result.failures)} échecs de récupération."
+        f"incomplètes"
+        + (f", {len(result.failures)} échecs de récupération." if result.failures else ".")
     )
 
     if result.ranked:
@@ -207,8 +291,14 @@ def view_watchlist() -> None:
         ticker = columns[0].text_input("Ticker (convention Yahoo, ex. AIR.PA, MSFT)")
         note = columns[1].text_input("Note personnelle (optionnelle)")
         if columns[2].form_submit_button("Ajouter") and ticker.strip():
-            db.add_to_watchlist(ticker.strip().upper(), note.strip())
-            st.success(f"{ticker.strip().upper()} ajouté.")
+            symbole = ticker.strip().upper()
+            with st.spinner(f"Vérification de {symbole}…"):
+                valide, message = verifier_ticker(symbole)
+            if valide:
+                db.add_to_watchlist(symbole, note.strip())
+                st.success(f"{symbole} — {message} — ajouté à la watchlist.")
+            else:
+                st.error(message)
 
     entries = db.watchlist()
     if not entries:
@@ -224,15 +314,21 @@ def view_watchlist() -> None:
         db.remove_from_watchlist(chosen)
         st.rerun()
 
+    # Les medianes sectorielles proviennent de la derniere analyse d'univers.
+    # A defaut, le critere « P/E vs secteur » reste non calculable : comparer
+    # un titre a lui-meme donnerait toujours un ratio de 1, donc un sous-score
+    # artificiel de 60/100 sans aucune signification.
+    medians = result.sector_medians if result else {}
     with st.spinner(f"Chargement des données de {chosen}…"):
-        fundamentals = service.load(chosen, target_years=config.target_years)
-        prices = service.price_history(chosen, period="5y")
-        medians = scoring.sector_pe_medians(
-            [fundamentals] + ([f for f in st.session_state.get("funds_cache", [])] or []),
-            min_peers=1,
+        fundamentals, prices, score = charger_titre(
+            chosen, tuple(sorted(medians.items())), config.target_years
         )
-        score = scoring.score_stock(
-            fundamentals, config, prices=prices, sector_medians=medians
+
+    if not medians:
+        st.caption(
+            "ℹ️ Critère « P/E vs médiane du secteur » non calculé : il nécessite "
+            "un univers de comparaison. Lancez une analyse depuis la vue Classement "
+            "pour l'activer."
         )
 
     st.subheader(f"{score.name or chosen} ({chosen})")
@@ -332,8 +428,19 @@ def view_alerts() -> None:
             columns[2].caption("Aucun paramètre requis")
             params = {}
         if columns[3].form_submit_button("Créer") and ticker.strip():
-            db.add_alert_rule(ticker.strip().upper(), kind, params)
-            st.success("Règle créée.")
+            symbole = ticker.strip().upper()
+            seuil = params.get("threshold")
+            if kind in ("price_above", "price_below") and not seuil:
+                # Un seuil nul rendrait la regle inopérante (ou toujours vraie).
+                st.error("Renseignez un seuil de cours strictement positif.")
+            else:
+                with st.spinner(f"Vérification de {symbole}…"):
+                    valide, message = verifier_ticker(symbole)
+                if valide:
+                    db.add_alert_rule(symbole, kind, params)
+                    st.success(f"Règle créée pour {symbole} — {message}.")
+                else:
+                    st.error(message)
 
     rules = db.alert_rules(enabled_only=False)
     if rules:

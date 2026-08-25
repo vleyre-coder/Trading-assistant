@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-from .models import StockScore
+from .models import CriterionResult, PillarResult, StockScore
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -21,7 +21,11 @@ CREATE TABLE IF NOT EXISTS runs (
     universes    TEXT NOT NULL,
     n_analyzed   INTEGER DEFAULT 0,
     n_ranked     INTEGER DEFAULT 0,
-    notes        TEXT DEFAULT ''
+    notes        TEXT DEFAULT '',
+    -- Medianes de P/E par secteur de cette execution : conservees pour que
+    -- le critere « P/E vs secteur » reste calculable apres redemarrage,
+    -- sans relancer une analyse d'univers complete.
+    sector_medians_json TEXT DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS scores (
@@ -69,7 +73,12 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     params_json TEXT NOT NULL DEFAULT '{}',
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
-    last_fired  TEXT
+    last_fired  TEXT,
+    -- Etat du seuil a la derniere evaluation ("crossed" / "clear"). Sans
+    -- cette memoire, une regle "cours au-dessous de 300" se redeclencherait
+    -- a chaque execution tant que le cours reste sous 300 : l'utilisateur
+    -- recevrait la meme alerte tous les jours.
+    last_state  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_rules_ticker ON alert_rules(ticker);
 
@@ -110,6 +119,23 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Ajout des colonnes apparues apres la creation d'une base existante."""
+        colonnes = {
+            row["name"] for row in conn.execute("PRAGMA table_info(alert_rules)").fetchall()
+        }
+        if "last_state" not in colonnes:
+            conn.execute("ALTER TABLE alert_rules ADD COLUMN last_state TEXT")
+        colonnes_runs = {
+            row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        if "sector_medians_json" not in colonnes_runs:
+            conn.execute(
+                "ALTER TABLE runs ADD COLUMN sector_medians_json TEXT DEFAULT '{}'"
+            )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -131,15 +157,24 @@ class Database:
             )
             return int(cur.lastrowid)
 
-    def finish_run(self, run_id: int, n_analyzed: int, n_ranked: int, notes: str = "") -> None:
+    def finish_run(
+        self,
+        run_id: int,
+        n_analyzed: int,
+        n_ranked: int,
+        notes: str = "",
+        sector_medians: dict[str, float] | None = None,
+    ) -> None:
         with self.connect() as conn:
             conn.execute(
-                "UPDATE runs SET finished_at = ?, n_analyzed = ?, n_ranked = ?, notes = ? WHERE id = ?",
+                """UPDATE runs SET finished_at = ?, n_analyzed = ?, n_ranked = ?,
+                   notes = ?, sector_medians_json = ? WHERE id = ?""",
                 (
                     datetime.now().isoformat(timespec="seconds"),
                     n_analyzed,
                     n_ranked,
                     notes,
+                    json.dumps(sector_medians or {}),
                     run_id,
                 ),
             )
@@ -285,6 +320,13 @@ class Database:
         with self.connect() as conn:
             conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
 
+    def set_rule_state(self, rule_id: int, state: str) -> None:
+        """Memorise l'etat du seuil pour ne notifier qu'au franchissement."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE alert_rules SET last_state = ? WHERE id = ?", (state, rule_id)
+            )
+
     def mark_rule_fired(self, rule_id: int) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -346,6 +388,47 @@ class Database:
                     datetime.now().isoformat(timespec="seconds"),
                 ),
             )
+
+
+def score_from_row(row: dict[str, Any]) -> StockScore:
+    """Reconstruit un StockScore complet a partir d'une ligne enregistree.
+
+    Permet d'afficher le dernier classement des l'ouverture de l'application,
+    sans relancer une analyse : une execution planifiee la nuit devient donc
+    directement consultable le matin.
+    """
+    payload = json.loads(row.get("detail_json") or "{}")
+    pillars: dict[str, PillarResult] = {}
+    for key, bloc in (payload.get("pillars") or {}).items():
+        pillars[key] = PillarResult(
+            key=key,
+            weight=float(bloc.get("weight", 0.0)),
+            score=bloc.get("score"),
+            coverage=float(bloc.get("coverage", 0.0)),
+            neutralized=bool(bloc.get("neutralized", False)),
+            criteria=[
+                CriterionResult(
+                    key=c["key"], label=c["label"], unit=c.get("unit", "ratio"),
+                    value=c.get("value"), score=c.get("score"),
+                    weight=float(c.get("weight", 0.0)), pillar=key,
+                    detail=c.get("detail", ""), reason_missing=c.get("reason_missing", ""),
+                )
+                for c in bloc.get("criteria", [])
+            ],
+        )
+    computed = row.get("computed_at")
+    return StockScore(
+        ticker=row["ticker"], name=row.get("name"), sector=row.get("sector"),
+        region=row.get("region"), currency=row.get("currency"), price=row.get("price"),
+        composite=row.get("composite"),
+        pillars=pillars,
+        window_years=int(row.get("window_years") or 0),
+        coverage=float(row.get("coverage") or 0.0),
+        ranked=bool(row.get("ranked")),
+        exclusion_reason=row.get("exclusion_reason") or "",
+        warnings=list(payload.get("warnings") or []),
+        computed_at=datetime.fromisoformat(computed) if computed else None,
+    )
 
 
 def _score_payload(score: StockScore) -> dict[str, Any]:

@@ -138,3 +138,21 @@ def test_interpolation_bornee_du_bareme():
     assert criterion.score(10.0) == criterion.points[-1][1]   # borne haute
     assert criterion.score(None) is None
     assert criterion.score(float("nan")) is None
+
+
+def test_echec_de_recuperation_distingue_des_donnees_incompletes():
+    """Un titre illisible ne doit pas etre presente comme ayant de mauvais
+    fondamentaux : c'est un echec technique, pas un diagnostic."""
+    from investassist.models import Fundamentals, Snapshot
+
+    vide = Fundamentals(
+        ticker="XXX", snapshot=Snapshot(ticker="XXX"), annual=[], region="EU",
+        fetch_failed=True,
+    )
+    assert vide.fetch_failed is True
+    assert vide.years_available == 0
+
+    partiel = make_fundamentals(years=2)
+    assert partiel.fetch_failed is False
+    score = scoring.score_stock(partiel, CONFIG)
+    assert score.ranked is False and "historique" in score.exclusion_reason

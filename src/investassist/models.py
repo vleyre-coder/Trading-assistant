@@ -79,6 +79,10 @@ class Fundamentals:
     sources: dict[str, str] = field(default_factory=dict)  # champ -> source retenue
     warnings: list[str] = field(default_factory=list)
     region: str | None = None
+    # Vrai quand AUCUNE donnee n'a pu etre recuperee : il s'agit alors d'un
+    # echec technique (source bridee, ticker inconnu), a distinguer d'un titre
+    # dont les fondamentaux sont reellement incomplets.
+    fetch_failed: bool = False
 
     @property
     def years_available(self) -> int:

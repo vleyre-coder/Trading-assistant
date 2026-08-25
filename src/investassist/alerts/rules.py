@@ -67,7 +67,14 @@ def evaluate_rules(
                 if kind == "price_above"
                 else score.price <= float(threshold)
             )
-            if crossed:
+            # Une alerte signale un FRANCHISSEMENT, pas un etat. Tant que le
+            # cours reste du meme cote du seuil, la regle ne se redeclenche
+            # pas : sinon la meme alerte reviendrait a chaque execution et
+            # deviendrait du bruit qu'on finit par ignorer.
+            etat = "crossed" if crossed else "clear"
+            deja_signale = rule.get("last_state") == "crossed"
+            db.set_rule_state(rule["id"], etat)
+            if crossed and not deja_signale:
                 sense = "au-dessus de" if kind == "price_above" else "au-dessous de"
                 events.append(
                     AlertEvent(

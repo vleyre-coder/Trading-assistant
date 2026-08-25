@@ -5,7 +5,7 @@ import pytest
 
 from investassist.config import load_scoring
 from investassist.models import PillarResult, StockScore
-from investassist.storage import Database
+from investassist.storage import Database, score_from_row
 
 CONFIG = load_scoring()
 
@@ -82,3 +82,55 @@ def test_publications_deja_vues(db):
     assert db.last_earnings_seen("MSFT") == "2026-06-30"
     db.set_last_earnings_seen("MSFT", "2026-09-30")
     assert db.last_earnings_seen("MSFT") == "2026-09-30"
+
+
+def test_reconstruction_complete_d_un_score(db):
+    """Aller-retour base -> objet : le detail par critere doit survivre."""
+    from investassist.models import CriterionResult, PillarResult
+
+    score = make_score("AAA", 77.5)
+    score.pillars["growth"].criteria = [
+        CriterionResult(
+            key="revenue_cagr", label="CAGR chiffre d'affaires", unit="percent",
+            value=0.124, score=71.0, weight=0.4, pillar="growth",
+            detail="2021 : 1,0 Md → 2025 : 1,6 Md",
+        ),
+        CriterionResult(
+            key="net_income_cagr", label="CAGR resultat net", unit="percent",
+            value=None, score=None, weight=0.35, pillar="growth",
+            reason_missing="base de depart negative",
+        ),
+    ]
+    score.warnings = ["Fenetre reduite a 4 exercices"]
+
+    run_id = db.start_run(["cac40"])
+    db.save_scores(run_id, [score], {"AAA": 1})
+    db.finish_run(run_id, 1, 1, sector_medians={"Technology": 21.0})
+
+    restaure = score_from_row(db.scores_for_run(run_id)[0])
+    assert restaure.ticker == "AAA"
+    assert restaure.composite == pytest.approx(77.5)
+    assert restaure.window_years == 5 and restaure.ranked is True
+    assert restaure.warnings == ["Fenetre reduite a 4 exercices"]
+
+    criteres = {c.key: c for c in restaure.criteria_flat()}
+    assert criteres["revenue_cagr"].value == pytest.approx(0.124)
+    assert criteres["revenue_cagr"].detail.startswith("2021")
+    assert criteres["net_income_cagr"].score is None
+    assert "negative" in criteres["net_income_cagr"].reason_missing
+
+
+def test_medianes_sectorielles_persistees(db):
+    import json
+
+    run_id = db.start_run(["cac40"])
+    db.finish_run(run_id, 1, 1, sector_medians={"Technology": 21.0, "Utilities": 14.2})
+    stocke = json.loads(db.last_run()["sector_medians_json"])
+    assert stocke["Technology"] == pytest.approx(21.0)
+
+
+def test_etat_des_regles_memorise(db):
+    rule_id = db.add_alert_rule("MSFT", "price_below", {"threshold": 300})
+    assert db.alert_rules()[0]["last_state"] is None
+    db.set_rule_state(rule_id, "crossed")
+    assert db.alert_rules()[0]["last_state"] == "crossed"

@@ -82,6 +82,28 @@ class YahooClient:
             return len(value) == 0
         return False
 
+    def _fetch(self, ticker: str, fn_name: str, *args, attempts: int = 3, **kwargs):
+        """Recupere une donnee en reessayant si la reponse revient vide.
+
+        Sous charge, Yahoo repond parfois par un contenu vide avec un code
+        HTTP 200. Sans reessai, le titre concerne perd tout son historique et
+        sort du classement pour une raison purement transitoire — un defaut
+        d'autant plus trompeur qu'il ressemble a une absence de donnees.
+        """
+        for tentative in range(attempts):
+            resultat = self._with_fallback(ticker, fn_name, *args, **kwargs)
+            if not self._is_empty(resultat):
+                return resultat
+            if tentative < attempts - 1:
+                time.sleep(1.5 * (tentative + 1))
+        log.warning(
+            "Yahoo : %s indisponible pour %s apres %s tentatives (bridage probable).",
+            fn_name,
+            ticker,
+            attempts,
+        )
+        return None
+
     def _with_fallback(self, ticker: str, fn_name: str, *args, _retried: bool = False, **kwargs):
         """Appelle une methode yfinance, avec repli sur une session requests.
 
@@ -151,6 +173,8 @@ class YahooClient:
                 if attempt < attempts - 1:
                     # Pause croissante : le bridage de Yahoo est transitoire.
                     time.sleep(1.5 * (attempt + 1))
+            # Un payload incomplet reste exploitable pour le peu qu'il contient,
+            # mais il ne sera pas mis en cache (voir plus bas).
             if not info:
                 return None
             if self._info_is_complete(info):
@@ -245,8 +269,8 @@ class YahooClient:
                 )
 
         warnings: list[str] = []
-        income = self._with_fallback(ticker, "income_stmt")
-        balance = self._with_fallback(ticker, "balance_sheet")
+        income = self._fetch(ticker, "income_stmt")
+        balance = self._fetch(ticker, "balance_sheet")
         if income is None or not hasattr(income, "columns") or income.empty:
             return [], [f"Yahoo : etats financiers annuels indisponibles pour {ticker}."]
 
@@ -310,7 +334,7 @@ class YahooClient:
         # d'actions mais PAS des dividendes. C'est la serie correcte pour
         # reconstituer un P/E historique (un cours reajuste des dividendes
         # sous-estime le P/E passe).
-        hist = self._with_fallback(ticker, "history", period=period, auto_adjust=False)
+        hist = self._fetch(ticker, "history", period=period, auto_adjust=False)
         if hist is None or not hasattr(hist, "empty") or hist.empty:
             return None
         frame = hist[["Close"]].copy()
@@ -352,6 +376,8 @@ class YahooClient:
             if cached is not None:
                 return {int(k): float(v) for k, v in cached.items()}
 
+        # Une serie de dividendes vide est un cas legitime (titre non
+        # distributeur) : un seul essai suffit, inutile d'attendre.
         series = self._with_fallback(ticker, "dividends")
         result: dict[int, float] = {}
         if series is not None and hasattr(series, "empty") and not series.empty:

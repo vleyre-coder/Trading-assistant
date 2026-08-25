@@ -27,19 +27,51 @@ avec le détail du calcul pour chaque titre.
 
 ---
 
-## Installation
+## Démarrage rapide
+
+**Prérequis unique : Python 3.11 ou plus.** Sous Windows, installez-le depuis
+le Microsoft Store (rechercher « Python 3.12 ») ou
+[python.org](https://www.python.org/downloads/) — dans ce dernier cas, cochez
+**« Add python.exe to PATH »** pendant l'installation.
+
+Ensuite :
+
+1. Téléchargez le dossier du projet sur votre ordinateur.
+2. Double-cliquez sur **`start.bat`** (Windows) ou **`start.sh`**
+   (macOS / Linux).
+3. Au premier lancement, l'outil installe ses bibliothèques (quelques minutes)
+   et vous demande une adresse email — exigée par l'API publique de la SEC sur
+   chaque requête, envoyée à elle seule et conservée localement.
+4. Le navigateur s'ouvre sur le tableau de bord.
+
+Les lancements suivants sont immédiats : rien n'est réinstallé. Sous macOS, si
+le double-clic n'exécute pas le fichier, ouvrez un terminal dans le dossier et
+tapez `./start.sh`.
+
+### Si quelque chose bloque au démarrage
+
+| Symptôme | Solution |
+|---|---|
+| Windows affiche « Windows a protégé votre ordinateur » | Cliquez sur **Informations complémentaires** puis **Exécuter quand même**. Le fichier vient d'Internet : Windows demande une confirmation, ce n'est pas une erreur. |
+| macOS refuse d'ouvrir `start.sh` | Clic droit sur le fichier → **Ouvrir**, puis confirmez. Ou depuis un terminal : `chmod +x start.sh && ./start.sh`. |
+| « Python 3.11 ou plus récent est nécessaire » | Installez Python et **relancez** le fichier. Sous Windows depuis python.org, cochez impérativement « Add python.exe to PATH ». |
+| La fenêtre s'ouvre puis se referme aussitôt | Lancez `start.bat` depuis une invite de commandes pour lire le message d'erreur, ou consultez `data/cron.log` s'il existe. |
+| Le navigateur ne s'ouvre pas | Ouvrez manuellement <http://localhost:8501>. |
+| L'installation échoue sur le téléchargement | Vérifiez la connexion Internet (un proxy d'entreprise peut bloquer PyPI), puis relancez. |
+| Pour arrêter l'outil | Fermez la fenêtre noire du lanceur. |
+
+### Installation manuelle (si vous préférez le terminal)
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows : .venv\Scripts\activate
 pip install -r requirements.txt
-
-cp config/settings.example.yaml config/settings.yaml
-# puis éditer config/settings.yaml (au minimum : sec.user_agent)
+cp config/settings.example.yaml config/settings.yaml   # puis renseigner sec.user_agent
+streamlit run app.py
 ```
 
-Python 3.11 ou plus. `config/settings.yaml` est dans `.gitignore` : les
-identifiants SMTP et la clé API n'y seront jamais committés.
+`config/settings.yaml` est dans `.gitignore` : les identifiants SMTP et la clé
+API n'y seront jamais committés.
 
 ## Utilisation
 
@@ -48,12 +80,16 @@ identifiants SMTP et la clé API n'y seront jamais committés.
 python scripts/validate_ticker.py MSFT
 python scripts/validate_ticker.py AIR.PA --no-cache
 
-# 2. Lancer le tableau de bord
+# 2. Tableau de bord (équivalent du double-clic sur start.bat / start.sh)
 streamlit run app.py
 
 # 3. Analyse complète en ligne de commande (pour une tâche planifiée)
 python scripts/run_screening.py --universes cac40,nasdaq100
 ```
+
+À l'ouverture, le tableau de bord réaffiche **le dernier classement
+enregistré** : une analyse planifiée pendant la nuit est donc consultable
+immédiatement le matin, sans rien relancer.
 
 `validate_ticker.py` affiche chaque donnée brute récupérée, chaque critère,
 son sous-score et le détail du calcul. C'est l'outil à utiliser en premier :
@@ -194,6 +230,11 @@ valorisables pour être significatif.
   nouvelle publication de résultats, variation du score composite au-delà d'un
   seuil, entrée ou sortie du top N. Envoi par notification locale
   (`data/notifications.log` + notification de bureau) et/ou email SMTP.
+  Une alerte se déclenche au **franchissement**, pas tant que la condition
+  reste vraie : une règle « cours au-dessous de 300 » notifie une fois, puis
+  se réarme seulement si le cours repasse au-dessus. Les tickers et les seuils
+  sont vérifiés à la création de la règle, pour éviter une alerte qui ne
+  partirait jamais à cause d'une faute de frappe.
 - **Historique des scores** — évolution du score et du rang dans le temps,
   historique par critère, stocké en SQLite local.
 
@@ -208,6 +249,9 @@ valorisables pour être significatif.
 **Windows (Tâches planifiées)** — action : démarrer un programme
 `C:\chemin\.venv\Scripts\python.exe`, arguments `scripts\run_screening.py --quiet`,
 répertoire de départ `C:\chemin\Trading-assistant`.
+
+Après une exécution planifiée, ouvrez simplement le tableau de bord : il
+réaffiche le dernier classement enregistré sans rien recalculer.
 
 **Sans planificateur système** :
 
@@ -266,8 +310,9 @@ que vous avez défini vous-même, et ne constitue pas une incitation à agir.
   au profit de `price_to_book` (qui reste calculable en cas de perte).
 - Les données ne sont **pas auditées**. Une erreur de source se propage au
   score. Le détail par critère est là pour vous permettre de la repérer.
-- **Durée d'exécution** : environ 5 à 6 secondes par titre sans cache, soit
-  ~15 minutes pour 140 titres avec 4 requêtes en parallèle. Un cache disque de
+- **Durée d'exécution** : mesurée à **490 secondes pour 144 titres** (CAC 40 +
+  Nasdaq-100) sans cache, soit environ 3,4 secondes par titre avec 4 requêtes
+  en parallèle. Un cache disque de
   12 h (configurable) évite de reconsommer les quotas à chaque rafraîchissement
   d'écran. Sous forte parallélisation, Yahoo renvoie parfois un contenu tronqué
   avec un code HTTP 200 : ces réponses sont détectées, réessayées et **jamais**
@@ -304,8 +349,20 @@ tests/             58 tests hors ligne, fixtures figées
 python -m pytest tests/ -q
 ```
 
-58 tests, **aucun appel réseau** : fixtures EDGAR figées (dont un cas de
+83 tests, **aucun appel réseau** : fixtures EDGAR figées (dont un cas de
 comparatif retraité après division d'actions), cas limites des critères
 (base négative, EBITDA négatif, fonds propres négatifs, PEG non interprétable),
-règles d'exclusion, stockage SQLite, et vérification que chaque vue de
-l'interface affiche l'avertissement de non-conseil.
+règles d'exclusion, non-répétition des alertes, intégrité des univers,
+restauration du dernier classement depuis SQLite, et vérification que chaque
+vue de l'interface affiche l'avertissement de non-conseil.
+
+### Pièges vérifiés par des tests de non-régression
+
+- Un ticker non quoté dans `universes.yaml` parmi `ON`, `OFF`, `YES`, `NO`,
+  `Y`, `N` est lu par YAML comme un **booléen**. Le ticker `ON`
+  (ON Semiconductor, Nasdaq-100) disparaissait ainsi de l'analyse. Gardez les
+  guillemets ; un test vérifie cette contrainte sur tout le fichier.
+- Une alerte de seuil ne doit se déclencher qu'au **franchissement**, jamais
+  tant que la condition reste vraie.
+- Les données par action d'EDGAR doivent être retraitées des divisions
+  d'actions selon la date de **dépôt**, jamais deux fois.

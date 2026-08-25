@@ -87,7 +87,7 @@ def main() -> int:
 
     if result.failures:
         print(f"\n{len(result.failures)} échec(s) de récupération : "
-              + ", ".join(sorted(result.failures)))
+              + ", ".join(str(t) for t in sorted(result.failures, key=str)))
 
     if not args.no_alerts and result.run_id:
         previous = database.previous_snapshot(result.run_id)

@@ -39,6 +39,10 @@ class ScreeningResult:
     # Derniere periode de reference publiee, par ticker : sert a detecter une
     # nouvelle publication de resultats sans appel reseau supplementaire.
     last_earnings: dict[str, str] = field(default_factory=dict)
+    # Medianes de P/E par secteur calculees sur cet univers : reutilisables
+    # ailleurs dans l'interface pour que le critere relatif au secteur ait un
+    # sens (comparer un titre a lui-meme donnerait toujours un ratio de 1).
+    sector_medians: dict[str, float] = field(default_factory=dict)
     run_id: int | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -52,15 +56,33 @@ class ScreeningResult:
         return scoring.to_dataframe(self.ranked)
 
 
-def tickers_for(universes: Sequence[str]) -> list[str]:
-    catalogue = load_universes().get("universes") or {}
+def tickers_for(universes: Sequence[str], catalogue: dict | None = None) -> list[str]:
+    """Liste des tickers des univers demandes, dedoublonnee.
+
+    Les valeurs non textuelles sont ecartees avec un message explicite : en
+    YAML, un ticker non quote parmi ON, OFF, YES, NO, Y, N, TRUE ou FALSE est
+    lu comme un booleen. Le ticker ON (ON Semiconductor) du Nasdaq-100 devient
+    ainsi True, disparait de l'analyse et fait echouer les affichages en aval.
+    """
+    if catalogue is None:
+        catalogue = load_universes().get("universes") or {}
     tickers: list[str] = []
     for name in universes:
         block = catalogue.get(name)
         if not block:
             log.warning("Univers inconnu dans config/universes.yaml : %s", name)
             continue
-        tickers.extend(block.get("tickers") or [])
+        for valeur in block.get("tickers") or []:
+            if isinstance(valeur, str) and valeur.strip():
+                tickers.append(valeur.strip())
+            else:
+                log.error(
+                    "Ticker invalide dans l'univers « %s » : %r. Entourez chaque "
+                    "ticker de guillemets dans config/universes.yaml (ON, NO, Y… "
+                    "sont interpretes comme des booleens par YAML).",
+                    name,
+                    valeur,
+                )
     # Dedoublonnage en preservant l'ordre.
     return list(dict.fromkeys(tickers))
 
@@ -129,6 +151,15 @@ class Screener:
                 if fund is None:
                     failures[ticker] = error
                     continue
+                if fund.fetch_failed:
+                    # Distinction importante pour l'utilisateur : ce titre n'est
+                    # pas « mauvais », il n'a pas pu etre lu. Une relance suffit
+                    # generalement.
+                    failures[ticker] = (
+                        "aucune donnee recuperee (source momentanement "
+                        "indisponible ou ticker inconnu) — relancer l'analyse"
+                    )
+                    continue
                 funds[ticker] = fund
                 prices[ticker] = price_frame
                 # Le calcul des criteres propres au titre peut se faire des
@@ -162,6 +193,7 @@ class Screener:
             excluded=excluded,
             failures=failures,
             last_earnings=last_earnings,
+            sector_medians=medians,
             run_id=run_id,
             started_at=started,
             finished_at=datetime.now(),
@@ -178,5 +210,6 @@ class Screener:
                     f"{len(excluded)} titre(s) exclu(s) pour donnees incompletes ; "
                     f"{len(failures)} echec(s) de recuperation"
                 ),
+                sector_medians=medians,
             )
         return result

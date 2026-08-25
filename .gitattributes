@@ -1,0 +1,8 @@
+# Fins de ligne : un .bat en LF peut echouer sur d'anciennes consoles Windows,
+# et un .sh en CRLF echoue systematiquement sous macOS et Linux.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh  text eol=lf
+
+# Fixtures de test : figees telles quelles.
+tests/fixtures/*.json -text

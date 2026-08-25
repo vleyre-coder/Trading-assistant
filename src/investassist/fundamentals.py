@@ -105,9 +105,13 @@ class FundamentalsService:
 
         if not base:
             warnings.append(f"Aucun historique annuel exploitable pour {ticker}.")
+            # Ni cours ni comptes : la source n'a rien renvoye. On le signale
+            # comme un echec technique plutot que comme une lacune des
+            # fondamentaux du titre, qui serait un diagnostic trompeur.
             return Fundamentals(
                 ticker=ticker, snapshot=snapshot, annual=[], sources=sources,
                 warnings=warnings, region=region,
+                fetch_failed=snapshot.price is None,
             )
 
         by_year: dict[int, AnnualRecord] = {r.fiscal_year: r for r in base}
