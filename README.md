@@ -95,6 +95,36 @@ API protégée) et le publie en téléchargement.
 
 ## Publier vos modifications vers votre dépôt GitHub
 
+### Comprendre le circuit
+
+Il n'existe que **deux emplacements**, pas trois. GitHub Desktop n'est pas une
+copie supplémentaire de votre dépôt : c'est une télécommande graphique pour Git,
+au même titre que `publier.bat`.
+
+```
+   VOTRE PC                                  GITHUB (en ligne)
+   ┌─────────────────────────┐              ┌──────────────────────┐
+   │ Bureau\Trading-assistant │ ── Push ──► │ Llegender/           │
+   │ (dossier de travail)     │ ◄── Pull ── │ Trading-assistant    │
+   └─────────────────────────┘              └──────────────────────┘
+        ▲
+        └── GitHub Desktop ou publier.bat : deux façons de piloter la MÊME flèche
+```
+
+- On **clone une seule fois**. Ce dossier devient le dossier de travail
+  permanent : inutile de retélécharger un ZIP par la suite.
+- La synchronisation existe, mais elle est **déclenchée par vous** : `Push`
+  envoie vos modifications, `Pull` récupère ce qui a changé en ligne. Rien ne
+  bouge automatiquement.
+- L'envoi va **directement** de votre dossier vers GitHub. Il n'y a aucune étape
+  intermédiaire entre « version bureau » et « version en ligne ».
+
+Le dossier `donnees/` n'est jamais publié : sur deux ordinateurs, le code se
+synchronise par Git, mais l'historique de scores et la watchlist se transportent
+en copiant ce dossier (clé USB), comme le reste de l'application portable.
+
+### Le script
+
 Vous travaillez dans un dossier local, vous modifiez des pondérations ou des
 univers, et vous voulez conserver ces changements dans votre dépôt : double-
 cliquez sur **`publier.bat`** (Windows) ou lancez `./publier.sh`.
