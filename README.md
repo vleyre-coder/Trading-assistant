@@ -112,6 +112,37 @@ fichiers, puis publie l'état actuel du dossier comme une nouvelle mise à jour.
   Message du commit [Mise à jour du 28/08/2026 06:15] :
 ```
 
+### Ce qui arrive aux fichiers déjà présents sur le dépôt
+
+Le comportement diffère selon l'origine du dossier — vérifié par exécution sur
+un dépôt réel :
+
+| Origine du dossier | Effet sur le dépôt |
+|---|---|
+| **Dossier cloné** (`git clone`) | **Fusion.** Un fichier ajouté entre-temps depuis un autre poste est conservé. Seul ce que vous modifiez change. |
+| **Dossier issu d'un ZIP** | **Miroir.** Le dépôt reflète exactement votre dossier : un fichier présent sur le dépôt mais absent du dossier serait supprimé. |
+
+Dans les deux cas, **l'historique conserve tout** : une version supprimée reste
+récupérable dans les commits précédents. Ce qui s'accumule, ce sont les commits
+— jamais des doublons de fichiers.
+
+Parce que le second cas peut faire perdre du travail, le script **refuse de
+publier** dès qu'une suppression est en jeu : il liste les fichiers concernés et
+attend votre accord explicite. Sans confirmation, rien n'est envoyé.
+
+```
+  ATTENTION — 3 fichier(s) présent(s) sur le dépôt
+  seraient SUPPRIMÉS, car absents de ce dossier :
+    ✕ README.md
+    ✕ dossier/module.py
+    ✕ fichier-important.txt
+
+  Publication annulée : rien n'a été envoyé.
+```
+
+La voie recommandée reste donc le clone : `git clone` une fois, puis vous
+travaillez dedans et publiez autant de fois que vous voulez.
+
 Ce qui n'est **jamais** publié : le dossier `donnees/` (votre base, votre
 watchlist, votre cache) et `config/settings.yaml` (vos identifiants SMTP). Le
 script complète `.gitignore` au besoin.

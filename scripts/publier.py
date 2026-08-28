@@ -162,6 +162,9 @@ def main() -> int:
     analyseur.add_argument("--message", default="", help="Message du commit")
     analyseur.add_argument("--sans-question", action="store_true",
                            help="N'interroge pas ; utilise les valeurs mémorisées")
+    analyseur.add_argument("--autoriser-suppressions", action="store_true",
+                           help="Autorise la suppression de fichiers présents "
+                                "seulement sur le dépôt distant")
     arguments = analyseur.parse_args()
 
     interactif = not arguments.sans_question
@@ -203,6 +206,35 @@ def main() -> int:
         print(f"    {ligne}")
     if len(lignes) > 15:
         print(f"    … et {len(lignes) - 15} autre(s)")
+
+    # Garde-fou : un dossier issu d'un ZIP ne contient pas forcement tout ce
+    # que porte le depot. Publier tel quel effacerait ces fichiers. On ne le
+    # fait donc jamais sans accord explicite.
+    suppressions = [ligne[3:] for ligne in lignes if ligne.startswith("D ")]
+    if suppressions and not arguments.autoriser_suppressions:
+        print(f"\n  ATTENTION — {len(suppressions)} fichier(s) présent(s) sur le dépôt")
+        print("  seraient SUPPRIMÉS, car absents de ce dossier :")
+        for chemin in suppressions[:12]:
+            print(f"    ✕ {chemin}")
+        if len(suppressions) > 12:
+            print(f"    … et {len(suppressions) - 12} autre(s)")
+        print("\n  Cela arrive quand ce dossier vient d'une archive ZIP qui ne")
+        print("  contient pas tout le dépôt. Les fichiers resteraient récupérables")
+        print("  dans l'historique, mais disparaîtraient de la version visible.")
+
+        accord = "n"
+        if interactif:
+            accord = demander("Confirmer la suppression de ces fichiers ? (o/n)", "n")
+        if not accord.lower().startswith("o"):
+            print("\n  Publication annulée : rien n'a été envoyé.")
+            print("  Deux solutions :")
+            print("   • récupérer d'abord le dépôt complet (git clone) puis y refaire")
+            print("     vos modifications — c'est la voie recommandée ;")
+            print("   • ou relancer avec --autoriser-suppressions si la suppression")
+            print("     est bien ce que vous voulez.")
+            executer("reset", "-q", silencieux=True)
+            pause(interactif)
+            return 1
 
     message = arguments.message
     if not message and not arguments.sans_question:

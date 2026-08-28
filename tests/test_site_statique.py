@@ -89,6 +89,18 @@ def test_lanceur_present_et_autonome():
     assert "jeton" in lanceur
 
 
+def test_publication_protege_contre_les_suppressions():
+    """Un dossier issu d'un ZIP ne contient pas forcement tout le dépôt :
+    publier tel quel effacerait les fichiers absents. Le script doit exiger
+    un accord explicite avant toute suppression."""
+    script = (ROOT / "scripts" / "publier.py").read_text(encoding="utf-8")
+    assert "autoriser_suppressions" in script
+    assert 'ligne.startswith("D ")' in script, "les suppressions doivent être détectées"
+    assert "Publication annulée" in script
+    # Sans accord, l'index est remis à zéro : rien ne part.
+    assert 'executer("reset", "-q"' in script
+
+
 def test_script_de_publication():
     script = (ROOT / "scripts" / "publier.py").read_text(encoding="utf-8")
     # Seuls le dépôt et la branche sont mémorisés : jamais d'identifiant.
