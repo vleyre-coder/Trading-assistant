@@ -1,14 +1,29 @@
-# Données locales et secrets — ne jamais committer
+# ---------------------------------------------------------------------
+# Données locales et secrets — ne jamais publier
+# ---------------------------------------------------------------------
 config/settings.yaml
-# Ancre a la racine : web/data/ contient les donnees publiees du site et
-# doit, lui, etre versionne.
+
+# Dossier portable de l'application : base SQLite, cache, exports locaux.
+donnees/
+
+# Ancré à la racine : web/data/ contient l'instantané publié avec
+# l'application et doit, lui, rester versionné.
 /data/
+
 *.sqlite
 *.sqlite3
 *.db
 .cache/
 
+# ---------------------------------------------------------------------
+# Artefacts de construction de l'exécutable
+# ---------------------------------------------------------------------
+dist/
+build/
+
+# ---------------------------------------------------------------------
 # Python
+# ---------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -18,7 +33,9 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# OS / IDE
+# ---------------------------------------------------------------------
+# Système et éditeurs
+# ---------------------------------------------------------------------
 .DS_Store
 .idea/
 .vscode/

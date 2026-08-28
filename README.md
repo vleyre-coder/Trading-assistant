@@ -27,69 +27,117 @@ avec le détail du calcul pour chaque titre.
 
 ---
 
-## Démarrage rapide
+## Installation
 
-**Prérequis unique : Python 3.11 ou plus.** Sous Windows, installez-le depuis
-le Microsoft Store (rechercher « Python 3.12 ») ou
-[python.org](https://www.python.org/downloads/) — dans ce dernier cas, cochez
-**« Add python.exe to PATH »** pendant l'installation.
+### Le plus simple : l'exécutable Windows
 
-Ensuite :
+1. Téléchargez `Investassist.exe` depuis la page **Releases** du dépôt.
+2. Placez-le dans un dossier de votre choix — le Bureau, une clé USB, peu importe.
+3. Double-cliquez. Une fenêtre noire s'ouvre, puis le navigateur affiche
+   l'application.
 
-1. Téléchargez le dossier du projet sur votre ordinateur.
-2. Double-cliquez sur **`start.bat`** (Windows) ou **`start.sh`**
-   (macOS / Linux).
-3. Au premier lancement, l'outil installe ses bibliothèques (quelques minutes)
-   et vous demande une adresse email — exigée par l'API publique de la SEC sur
-   chaque requête, envoyée à elle seule et conservée localement.
-4. Le navigateur s'ouvre sur le tableau de bord.
+Aucune installation de Python, aucune dépendance : le fichier contient tout.
+Si Windows affiche « Windows a protégé votre ordinateur », cliquez sur
+**Informations complémentaires** puis **Exécuter quand même** — le fichier vient
+d'Internet, Windows demande une confirmation.
 
-Les lancements suivants sont immédiats : rien n'est réinstallé. Sous macOS, si
-le double-clic n'exécute pas le fichier, ouvrez un terminal dans le dossier et
-tapez `./start.sh`.
+### L'application est portable
 
-### Si quelque chose bloque au démarrage
+Au premier lancement, deux dossiers apparaissent **à côté** de l'exécutable :
 
-| Symptôme | Solution |
-|---|---|
-| Windows affiche « Windows a protégé votre ordinateur » | Cliquez sur **Informations complémentaires** puis **Exécuter quand même**. Le fichier vient d'Internet : Windows demande une confirmation, ce n'est pas une erreur. |
-| macOS refuse d'ouvrir `start.sh` | Clic droit sur le fichier → **Ouvrir**, puis confirmez. Ou depuis un terminal : `chmod +x start.sh && ./start.sh`. |
-| « Python 3.11 ou plus récent est nécessaire » | Installez Python et **relancez** le fichier. Sous Windows depuis python.org, cochez impérativement « Add python.exe to PATH ». |
-| La fenêtre s'ouvre puis se referme aussitôt | Lancez `start.bat` depuis une invite de commandes pour lire le message d'erreur, ou consultez `data/cron.log` s'il existe. |
-| Le navigateur ne s'ouvre pas | Ouvrez manuellement <http://localhost:8501>. |
-| L'installation échoue sur le téléchargement | Vérifiez la connexion Internet (un proxy d'entreprise peut bloquer PyPI), puis relancez. |
-| Pour arrêter l'outil | Fermez la fenêtre noire du lanceur. |
-
-### Installation manuelle (si vous préférez le terminal)
-
-```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows : .venv\Scripts\activate
-pip install -r requirements.txt
-cp config/settings.example.yaml config/settings.yaml   # puis renseigner sec.user_agent
-streamlit run app.py
+```
+MonDossier/
+├── Investassist.exe
+├── config/      vos réglages : pondérations, barèmes, univers analysés
+└── donnees/     votre historique, votre watchlist, vos alertes, le cache
 ```
 
-`config/settings.yaml` est dans `.gitignore` : les identifiants SMTP et la clé
-API n'y seront jamais committés.
+**Copier ce dossier entier sur une autre machine suffit** à y retrouver l'outil
+dans le même état : même historique de scores, même watchlist, mêmes règles
+d'alerte. Rien n'est écrit ailleurs sur l'ordinateur, aucune entrée de registre,
+aucune installation.
+
+Si l'emplacement est en lecture seule (CD, partage réseau verrouillé),
+l'application bascule automatiquement sur le dossier utilisateur et l'indique
+au démarrage.
+
+### Réglage conseillé au premier lancement
+
+Ouvrez `config/settings.yaml` avec le Bloc-notes et remplacez l'adresse email de
+la ligne `user_agent`. L'API publique de la SEC l'exige pour fournir les données
+officielles des sociétés américaines — sans elle, l'analyse se limite à Yahoo
+Finance, soit quatre exercices au lieu de cinq. Cette adresse n'est transmise
+qu'à la SEC.
+
+### Depuis les sources (développement)
+
+```bash
+python -m venv .venv && source .venv/bin/activate   # Windows : .venv\Scripts\activate
+pip install -r requirements.txt
+python lanceur.py
+```
+
+Ou double-cliquez sur `start.bat` (Windows) / `start.sh` (macOS, Linux) : ils
+créent l'environnement, installent les dépendances puis lancent l'application.
+
+### Construire l'exécutable soi-même
+
+```bash
+pip install pyinstaller
+pyinstaller investassist.spec        # produit dist/Investassist.exe
+```
+
+PyInstaller ne sait pas produire un binaire Windows depuis Linux ou macOS : la
+construction doit tourner sur Windows. Le workflow
+`.github/workflows/executable.yml` s'en charge sur une machine Windows fournie
+par GitHub, éprouve l'exécutable produit (démarrage réel, interface servie,
+API protégée) et le publie en téléchargement.
+
+## Publier vos modifications vers votre dépôt GitHub
+
+Vous travaillez dans un dossier local, vous modifiez des pondérations ou des
+univers, et vous voulez conserver ces changements dans votre dépôt : double-
+cliquez sur **`publier.bat`** (Windows) ou lancez `./publier.sh`.
+
+Le script fonctionne même si le dossier vient d'un ZIP et n'a jamais été relié
+à Git : il récupère l'historique du dépôt distant, l'adopte sans toucher à vos
+fichiers, puis publie l'état actuel du dossier comme une nouvelle mise à jour.
+
+```
+  Dépôt GitHub [https://github.com/Llegender/Trading-assistant.git] :
+  Branche [main] :
+  4 fichier(s) modifié(s) :
+    M  config/scoring.yaml
+    M  config/universes.yaml
+  Message du commit [Mise à jour du 28/08/2026 06:15] :
+```
+
+Ce qui n'est **jamais** publié : le dossier `donnees/` (votre base, votre
+watchlist, votre cache) et `config/settings.yaml` (vos identifiants SMTP). Le
+script complète `.gitignore` au besoin.
+
+Aucun mot de passe ni jeton n'est enregistré : l'authentification est confiée au
+gestionnaire d'identifiants de Git. Prérequis : Git installé
+([git-scm.com](https://git-scm.com/download/win)) ou GitHub Desktop, qui gère la
+connexion pour vous.
 
 ## Utilisation
 
 ```bash
-# 1. Valider UN titre de bout en bout (à faire avant tout screening large)
+# Application complète (interface web servie localement)
+python lanceur.py
+
+# Valider UN titre de bout en bout, avec le détail de chaque critère
 python scripts/validate_ticker.py MSFT
 python scripts/validate_ticker.py AIR.PA --no-cache
 
-# 2. Tableau de bord (équivalent du double-clic sur start.bat / start.sh)
-streamlit run app.py
-
-# 3. Analyse complète en ligne de commande (pour une tâche planifiée)
+# Analyse complète en ligne de commande, sans interface
 python scripts/run_screening.py --universes cac40,nasdaq100
 ```
 
-À l'ouverture, le tableau de bord réaffiche **le dernier classement
-enregistré** : une analyse planifiée pendant la nuit est donc consultable
-immédiatement le matin, sans rien relancer.
+L'application affiche **le dernier classement enregistré** dès son ouverture, et
+un instantané est livré avec l'exécutable : vous voyez donc un classement daté
+immédiatement, sans attendre une première analyse de huit minutes.
 
 `validate_ticker.py` affiche chaque donnée brute récupérée, chaque critère,
 son sous-score et le détail du calcul. C'est l'outil à utiliser en premier :
@@ -219,13 +267,15 @@ valorisables pour être significatif.
 
 ## Fonctionnalités
 
-- **Classement** — tableau trié par score décroissant, sous-scores par pilier en
-  colonnes, export CSV, bouton « Relancer l'analyse maintenant ». Sélection du
-  titre pour voir le détail critère par critère : valeur brute, sous-score,
-  poids et explication du calcul.
-- **Watchlist** — ajout manuel de tickers, graphique de cours 5 ans, détail des
-  critères, exercices retenus avec la source de chaque champ, calendrier de
-  publication.
+- **Classement** — tableau trié, filtrable par zone, secteur et recherche
+  textuelle ; sous-scores par pilier en colonnes, micro-courbe de tendance, et
+  bouton **Lancer l'analyse maintenant** avec avancement titre par titre.
+- **Fiche par titre** — sous-scores des cinq piliers, puis chaque critère avec
+  sa valeur, son sous-score et l'explication du calcul ; courbe d'évolution du
+  score composite d'une analyse à l'autre.
+- **Watchlist** — enregistrée dans le dossier de l'application, donc elle vous
+  suit d'un ordinateur à l'autre. Un titre absent du dernier classement est
+  analysé à la demande, sans relancer l'univers entier.
 - **Alertes** — par titre : franchissement de seuil de cours (haut/bas),
   nouvelle publication de résultats, variation du score composite au-delà d'un
   seuil, entrée ou sortie du top N. Envoi par notification locale
@@ -236,7 +286,11 @@ valorisables pour être significatif.
   sont vérifiés à la création de la règle, pour éviter une alerte qui ne
   partirait jamais à cause d'une faute de frappe.
 - **Historique des scores** — évolution du score et du rang dans le temps,
-  historique par critère, stocké en SQLite local.
+  stockée en SQLite local.
+- **Aucune donnée ne sort de la machine** hormis les appels aux sources
+  financières. Le serveur n'écoute que sur `127.0.0.1` et exige un jeton tiré au
+  hasard à chaque démarrage : une page web ouverte dans un autre onglet ne peut
+  pas piloter l'application.
 
 ## Exécution périodique
 
@@ -250,8 +304,8 @@ valorisables pour être significatif.
 `C:\chemin\.venv\Scripts\python.exe`, arguments `scripts\run_screening.py --quiet`,
 répertoire de départ `C:\chemin\Trading-assistant`.
 
-Après une exécution planifiée, ouvrez simplement le tableau de bord : il
-réaffiche le dernier classement enregistré sans rien recalculer.
+Après une exécution planifiée, ouvrez simplement l'application : elle réaffiche
+le dernier classement enregistré sans rien recalculer.
 
 **Sans planificateur système** :
 
@@ -275,146 +329,6 @@ alerts:
 
 Chaque email porte le rappel que l'alerte constate un franchissement de seuil
 que vous avez défini vous-même, et ne constitue pas une incitation à agir.
-
-## Déploiement sur Netlify (consultation depuis n'importe où)
-
-Netlify ne peut pas héberger l'application Streamlit : il sert des fichiers
-statiques et des fonctions serverless de courte durée, alors que Streamlit
-exige un serveur Python permanent. Le déploiement retenu contourne cette
-limite en séparant le calcul de l'affichage :
-
-```
-GitHub Actions (nuit)          dépôt GitHub              Netlify
-┌──────────────────┐          ┌──────────────┐        ┌─────────────────┐
-│ analyse Python   │  push    │ web/data/    │ deploy │ site statique   │
-│ ~8 min, 143 titres├────────►│  *.json      ├───────►│ + mot de passe  │
-│ + envoi d'alertes│          │ web/*.html   │  auto  │ (fonction edge) │
-└──────────────────┘          └──────────────┘        └─────────────────┘
-```
-
-Netlify ne construit rien (`command = ""`) : il publie le dossier `web/` tel
-quel. **Aucune minute de build Netlify n'est consommée.**
-
-### Deux emplacements de configuration à ne pas confondre
-
-Les réglages se répartissent entre **deux services distincts**, parce que le
-calcul et l'affichage sont assurés par deux services différents :
-
-| Service | Variables à y définir | Pourquoi là |
-|---|---|---|
-| **GitHub** (*Settings → Secrets and variables → Actions*) | `SEC_USER_AGENT` et les secrets SMTP | C'est GitHub Actions qui **exécute l'analyse Python** et envoie les alertes |
-| **Netlify** (*Site configuration → Environment variables*) | `SITE_PASSWORD` uniquement | C'est Netlify qui **sert la page** et doit en contrôler l'accès |
-
-Netlify n'exécute aucun code Python dans ce montage : il publie des fichiers
-déjà calculés. Il n'a donc pas besoin de connaître votre adresse SEC ni votre
-mot de passe SMTP — et il vaut mieux qu'il ne les ait pas.
-
-Sans alertes email, il n'y a que **deux valeurs à saisir en tout** :
-`SEC_USER_AGENT` côté GitHub, `SITE_PASSWORD` côté Netlify.
-
-### Mise en place, une seule fois
-
-**1. Connecter le dépôt à Netlify**
-Sur Netlify : *Add new site → Import an existing project → GitHub*, choisir ce
-dépôt et la branche. Laisser la configuration proposée : `netlify.toml` fixe
-déjà le répertoire à publier (`web`) et l'absence de commande de build.
-
-**2. Définir le mot de passe du site**
-Netlify : *Site configuration → Environment variables → Add a variable*,
-nom `SITE_PASSWORD`, valeur au choix. La fonction edge
-`netlify/edge-functions/auth.ts` demandera ce mot de passe à chaque visite
-(le nom d'utilisateur est libre). **Sans cette variable, le site reste
-accessible à quiconque connaît l'URL** — c'est un choix délibéré pour ne pas
-rendre le site inaccessible par simple oubli, mais pensez à la définir.
-
-**3. Renseigner les secrets GitHub** *(côté GitHub, pas Netlify)*
-Dépôt GitHub → onglet **Settings** du dépôt (celui de la barre supérieure du
-dépôt, à ne pas confondre avec les réglages de votre compte) → menu de gauche
-**Secrets and variables → Actions** → **New repository secret**.
-
-| Secret | Rôle | Obligatoire |
-|---|---|---|
-| `SEC_USER_AGENT` | Identification exigée par la SEC, ex. `Investassist personnel - vous@exemple.fr` | oui |
-| `INVESTASSIST_EMAIL_ENABLED` | `true` pour activer les alertes email | non |
-| `INVESTASSIST_SMTP_HOST` | Serveur SMTP, ex. `smtp.gmail.com` | si email |
-| `INVESTASSIST_SMTP_PORT` | `587` (STARTTLS) ou `465` (SSL) | si email |
-| `INVESTASSIST_SMTP_USER` | Identifiant SMTP | si email |
-| `INVESTASSIST_SMTP_PASSWORD` | **Mot de passe d'application**, jamais le mot de passe principal | si email |
-| `INVESTASSIST_SMTP_SENDER` | Adresse d'expédition | si email |
-| `INVESTASSIST_EMAIL_RECIPIENTS` | Destinataires, séparés par des virgules | si email |
-
-**4. Lancer la première analyse**
-Onglet *Actions → Analyse fondamentale → Run workflow*. Elle prend environ
-8 minutes, pousse les fichiers de données, et Netlify publie dans la foulée.
-Ensuite, l'analyse tourne automatiquement du lundi au vendredi à 06h00 UTC
-(08h00 à Paris en heure d'été) — modifiable dans
-`.github/workflows/analyse.yml`.
-
-### Ce que le site propose
-
-- Classement complet, triable par n'importe quelle colonne, filtrable par
-  zone, par secteur et par recherche textuelle.
-- Détail par titre : sous-scores des cinq piliers, puis chaque critère avec sa
-  valeur, son sous-score et l'explication du calcul.
-- Courbe d'évolution du score composite d'une analyse à l'autre.
-- Titres non classés, avec le motif exact, et échecs de récupération à part.
-- Méthodologie complète : pondérations, barèmes, règles d'exclusion.
-- Watchlist personnelle, stockée **dans votre navigateur uniquement**
-  (`localStorage`) : rien n'est transmis, mais elle ne suit pas d'un appareil
-  à l'autre.
-- Avertissement de non-conseil présent dans le HTML servi — un test vérifie
-  qu'il ne dépend pas de l'exécution du JavaScript.
-
-### Ce que le site ne fait pas
-
-- **Pas de recalcul à la demande** : le classement est celui de la dernière
-  analyse planifiée. Pour rafraîchir, lancez le workflow manuellement depuis
-  l'onglet Actions (~8 min).
-- **Pas de création d'alerte depuis le navigateur** : un site statique n'a pas
-  de serveur pour les mémoriser. Les règles se déclarent dans
-  `config/alerts.yaml` — modifier ce fichier et pousser suffit, l'analyse
-  suivante en tiendra compte.
-
-### Configuration des alertes planifiées
-
-```yaml
-# config/alerts.yaml
-watchlist: ["MSFT", "AIR.PA"]      # titres suivis par les alertes générales
-general:
-  kinds: ["score_change", "top_n_entry", "top_n_exit", "earnings_published"]
-  score_change_threshold: 5.0
-  top_n: 20
-rules:                             # règles avec seuil propre
-  - ticker: "MC.PA"
-    kind: "price_below"
-    threshold: 500
-```
-
-La mémoire des alertes (seuil déjà franchi, dernière publication vue) voyage
-dans `web/data/alert_state.json`, publié avec le site : une exécution en
-intégration continue ne conserve aucun disque, mais le moteur d'alertes reste
-strictement le même qu'en local. À la toute première analyse, aucune alerte
-n'est envoyée : sans point de comparaison, chaque titre paraîtrait « entrer »
-dans le classement.
-
-### Coûts et quotas
-
-- **Netlify** : aucune minute de build (rien n'est construit), seulement de la
-  bande passante — quelques centaines de kilo-octets par visite.
-- **GitHub Actions** : environ 10 minutes par exécution, soit ~220 minutes par
-  mois pour cinq analyses hebdomadaires. Le quota gratuit est de 2 000 minutes
-  par mois pour un dépôt privé, et illimité pour un dépôt public.
-- **Poids du dépôt** : `ranking.json` pèse environ 540 Ko (64 Ko une fois
-  compressé par Netlify) et est réécrit à chaque analyse, soit de l'ordre de
-  30 Mo par an dans l'historique Git. Pour repartir à zéro si besoin :
-  `git rm --cached web/data/ranking.json` puis un nouveau commit.
-
-### Garde-fou
-
-Si une analyse renvoie moins de dix titres classés — panne de source, bridage
-généralisé — le workflow échoue volontairement **avant** de publier : la
-dernière analyse valide reste en ligne plutôt que d'être remplacée par un
-classement vide.
 
 ## Limites connues
 
@@ -495,13 +409,14 @@ tests/             108 tests hors ligne, fixtures figées
 python -m pytest tests/ -q
 ```
 
-108 tests, **aucun appel réseau** : fixtures EDGAR figées (dont un cas de
+114 tests, **aucun appel réseau** : fixtures EDGAR figées (dont un cas de
 comparatif retraité après division d'actions), cas limites des critères
 (base négative, EBITDA négatif, fonds propres négatifs, PEG non interprétable),
 règles d'exclusion, non-répétition des alertes, intégrité des univers,
-restauration du dernier classement depuis SQLite, format d'export du site,
-câblage du déploiement Netlify, et vérification que chaque vue de l'interface
-— locale comme publiée — affiche l'avertissement de non-conseil.
+restauration du dernier classement depuis SQLite, format d'export, et
+serveur local démarré pour de vrai sur un port libre puis interrogé en HTTP
+(routage, protection par jeton, traversée de répertoire). L'avertissement de
+non-conseil est vérifié dans le HTML servi, indépendamment du JavaScript.
 
 ### Pièges vérifiés par des tests de non-régression
 

@@ -1,0 +1,108 @@
+# =====================================================================
+# Construction de l'executable Windows
+# ---------------------------------------------------------------------
+# PyInstaller ne sait pas produire un binaire Windows depuis Linux : la
+# construction tourne donc sur une machine Windows fournie par GitHub.
+# Le resultat est publie en piece jointe d'une version, telechargeable
+# sans compte GitHub, et en artefact de l'execution.
+# =====================================================================
+name: Executable
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install yfinance pandas numpy requests PyYAML pyinstaller
+
+      - name: Vérifier que l'application démarre avant de l'empaqueter
+        # Une recette d'empaquetage juste ne sert a rien si l'application est
+        # deja cassee : on l'eprouve d'abord depuis les sources.
+        run: python -m pytest tests/ -q
+        continue-on-error: false
+
+      - name: Construire l'exécutable
+        run: python -m PyInstaller investassist.spec --noconfirm
+
+      - name: Éprouver l'exécutable produit
+        # Verification reelle : l'executable demarre, sert l'interface, et
+        # refuse l'API sans jeton.
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "dist\Investassist.exe" `
+            -ArgumentList "--sans-navigateur","--port","8797" `
+            -PassThru -RedirectStandardOutput "demarrage.log" -RedirectStandardError "erreurs.log"
+          Start-Sleep -Seconds 40
+          try {
+            $page = Invoke-WebRequest -Uri "http://127.0.0.1:8797/" -UseBasicParsing -TimeoutSec 20
+            if ($page.StatusCode -ne 200) { throw "page d'accueil : HTTP $($page.StatusCode)" }
+            $donnees = Invoke-WebRequest -Uri "http://127.0.0.1:8797/data/ranking.json" -UseBasicParsing -TimeoutSec 20
+            if ($donnees.StatusCode -ne 200) { throw "données : HTTP $($donnees.StatusCode)" }
+            try {
+              Invoke-WebRequest -Uri "http://127.0.0.1:8797/api/etat" -UseBasicParsing -TimeoutSec 20 | Out-Null
+              throw "l'API a répondu sans jeton : protection inopérante"
+            } catch [System.Net.WebException] {
+              Write-Host "API correctement protégée."
+            }
+            Write-Host "Exécutable vérifié : interface et données servies."
+          } finally {
+            Get-Content demarrage.log -ErrorAction SilentlyContinue
+            Get-Content erreurs.log -ErrorAction SilentlyContinue
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Préparer le dossier à distribuer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path paquet -Force | Out-Null
+          Copy-Item dist\Investassist.exe paquet\
+          Copy-Item LISEZ-MOI.txt paquet\ -ErrorAction SilentlyContinue
+          Compress-Archive -Path paquet\* -DestinationPath Investassist-windows.zip -Force
+
+      - name: Conserver l'exécutable en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Investassist-windows
+          path: Investassist-windows.zip
+          retention-days: 90
+
+      - name: Publier une version téléchargeable
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Investassist.exe
+            Investassist-windows.zip
+          body: |
+            Application Investassist pour Windows.
+
+            Téléchargez `Investassist.exe`, placez-le dans un dossier de votre
+            choix, puis double-cliquez. Les réglages et les données sont créés
+            à côté de l'exécutable : copier ce dossier suffit à emporter
+            l'outil, son historique et sa watchlist sur un autre ordinateur.
+
+            Classement calculé à partir de données fondamentales historiques et
+            actuelles. Ne constitue pas un conseil en investissement ni une
+            prédiction de performance future.

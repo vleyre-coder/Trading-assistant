@@ -66,7 +66,7 @@ def _user_facing_strings(source: str) -> list[tuple[int, str]]:
 
 def test_aucune_formulation_prescriptive_dans_le_code():
     """Balayage des textes destines a l'utilisateur (hors documentation)."""
-    files = [ROOT / "app.py"] + sorted((ROOT / "src").rglob("*.py"))
+    files = [ROOT / "lanceur.py"] + sorted((ROOT / "src").rglob("*.py"))
     fautes = []
     for path in files:
         for ligne, texte in _user_facing_strings(path.read_text(encoding="utf-8")):
@@ -77,13 +77,23 @@ def test_aucune_formulation_prescriptive_dans_le_code():
     assert fautes == [], "Formulations prescriptives detectees : " + "; ".join(fautes)
 
 
-def test_chaque_vue_de_l_interface_appelle_la_banniere():
-    """Garde-fou : toute vue de app.py doit afficher l'avertissement."""
-    content = (ROOT / "app.py").read_text(encoding="utf-8")
-    vues = re.findall(r"^def (view_\w+)\(\) -> None:(.*?)(?=^def |\Z)", content, re.M | re.S)
-    assert vues, "aucune vue detectee dans app.py"
-    sans_banniere = [nom for nom, corps in vues if "disclaimer_banner" not in corps]
-    assert sans_banniere == [], f"Vues sans avertissement : {sans_banniere}"
+def test_interface_web_porte_l_avertissement():
+    """Garde-fou : l'avertissement figure dans le HTML servi, donc visible
+    quelle que soit la vue et meme si le script echoue."""
+    page = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    sans_balises = re.sub(r"<[^>]+>", " ", page).lower()
+    assert "conseil en investissement" in sans_balises
+    assert "prédiction de performance future" in sans_balises
+
+    script = (ROOT / "web" / "assets" / "app.js").read_text(encoding="utf-8")
+    # L'avertissement affiche provient des donnees : il ne peut donc pas
+    # diverger de celui du moteur d'analyse.
+    assert "avertissement-principal" in script and "disclaimer" in script
+
+
+def test_lanceur_affiche_l_avertissement():
+    lanceur = (ROOT / "lanceur.py").read_text(encoding="utf-8")
+    assert "MAIN" in lanceur, "la console doit rappeler l'avertissement au démarrage"
 
 
 def test_pied_de_page_des_alertes():

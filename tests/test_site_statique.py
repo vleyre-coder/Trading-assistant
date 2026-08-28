@@ -1,8 +1,8 @@
-"""Verifications du cablage du site statique et de son deploiement.
+"""Verifications du cablage de l'interface et de l'empaquetage.
 
 Ces tests protegent des erreurs muettes : un chemin de fichier renomme, une
-configuration Netlify qui ne publie pas le bon repertoire, ou un site publie
-sans son avertissement de non-conseil.
+recette d'empaquetage qui oublie l'interface, ou une page servie sans son
+avertissement de non-conseil.
 """
 from __future__ import annotations
 
@@ -56,33 +56,46 @@ def test_aucune_ressource_externe():
             assert url.startswith(autorises), f"ressource externe dans {chemin} : {url}"
 
 
-def test_configuration_netlify():
-    configuration = (ROOT / "netlify.toml").read_text(encoding="utf-8")
-    assert 'publish = "web"' in configuration
-    assert 'function = "auth"' in configuration
-    assert "noindex" in configuration
-    assert (ROOT / "netlify" / "edge-functions" / "auth.ts").exists()
+def test_recette_d_empaquetage_embarque_l_essentiel():
+    """Une recette qui oublie l'interface ou la configuration produit un
+    executable qui demarre puis affiche une page blanche."""
+    recette = (ROOT / "investassist.spec").read_text(encoding="utf-8")
+    for ressource in ("web/index.html", "web/assets", "config/scoring.yaml",
+                      "config/universes.yaml", "config/settings.example.yaml"):
+        assert ressource in recette, f"ressource absente de l'empaquetage : {ressource}"
+    assert '"lanceur.py"' in recette
+    # Les bibliotheques de l'ancienne interface alourdiraient l'executable.
+    assert '"streamlit"' in recette and '"plotly"' in recette
 
 
-def test_fonction_de_protection():
-    fonction = (ROOT / "netlify" / "edge-functions" / "auth.ts").read_text(encoding="utf-8")
-    # Le mot de passe vient d'une variable d'environnement, jamais du depot.
-    assert 'Deno.env.get("SITE_PASSWORD")' in fonction
-    assert "WWW-Authenticate" in fonction
-    assert "comparaisonConstante" in fonction
-    assert not re.search(r'attendu\s*=\s*"[^"]+"', fonction), "mot de passe en dur"
+def test_workflow_de_construction():
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/executable.yml").read_text(encoding="utf-8")
+    )
+    travail = workflow["jobs"]["windows"]
+    assert travail["runs-on"] == "windows-latest"
+    etapes = json.dumps(travail["steps"], ensure_ascii=False)
+    assert "investassist.spec" in etapes
+    # L'executable produit doit etre eprouve, pas seulement construit.
+    assert "127.0.0.1:8797" in etapes
+    assert "pytest" in etapes
 
 
-def test_workflow_planifie():
-    workflow = yaml.safe_load((ROOT / ".github/workflows/analyse.yml").read_text(encoding="utf-8"))
-    declencheurs = workflow[True] if True in workflow else workflow["on"]
-    assert "schedule" in declencheurs and "workflow_dispatch" in declencheurs
-    assert workflow["jobs"]["analyser"]["permissions"]["contents"] == "write"
-    etapes = json.dumps(workflow["jobs"]["analyser"]["steps"], ensure_ascii=False)
-    assert "scripts/build_site.py" in etapes
-    # Les identifiants passent par des secrets, jamais en clair.
-    assert "${{ secrets.INVESTASSIST_SMTP_PASSWORD }}" in etapes
-    assert "password" not in etapes.lower().replace("smtp_password", "")
+def test_lanceur_present_et_autonome():
+    lanceur = (ROOT / "lanceur.py").read_text(encoding="utf-8")
+    assert "demarrer(" in lanceur
+    assert "127.0.0.1" in lanceur
+    # Le jeton doit etre affiche : sans lui, l'interface est inaccessible.
+    assert "jeton" in lanceur
+
+
+def test_script_de_publication():
+    script = (ROOT / "scripts" / "publier.py").read_text(encoding="utf-8")
+    # Seuls le dépôt et la branche sont mémorisés : jamais d'identifiant.
+    assert 'enregistrer_memoire({"depot": depot, "branche": branche})' in script
+    # Les données locales et les réglages ne doivent jamais être publiés.
+    assert "donnees/" in script and "config/settings.yaml" in script
+    assert (ROOT / "publier.bat").exists() and (ROOT / "publier.sh").exists()
 
 
 @pytest.mark.skipif(not (WEB / "data/ranking.json").exists(), reason="aucune analyse publiee")

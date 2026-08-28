@@ -11,6 +11,13 @@
   const THEMES = ["auto", "light", "dark"];
   const LIBELLE_THEME = { auto: "automatique", light: "clair", dark: "sombre" };
   const etat = {
+    // Renseigne lorsque la page est servie par l'application locale : elle
+    // expose alors une API que la version hors ligne n'a pas.
+    appli: null,
+    jeton: null,
+    watchlist: [],
+    analyse: null,
+    alertes: null,
     donnees: null,
     historique: null,
     vue: "classement",
@@ -112,9 +119,21 @@
     }
   }
 
-  const estSuivi = (ticker) => lireWatchlist().includes(ticker);
+  /** En mode application la watchlist vit dans la base locale (elle suit donc
+      le dossier copie d'un ordinateur a l'autre) ; hors ligne elle reste dans
+      le navigateur. */
+  const listeSuivie = () => (etat.appli ? etat.watchlist : lireWatchlist());
 
-  function basculerWatchlist(ticker) {
+  const estSuivi = (ticker) => listeSuivie().includes(ticker);
+
+  async function basculerWatchlist(ticker) {
+    if (etat.appli) {
+      const reponse = etat.watchlist.includes(ticker)
+        ? await api(`/api/watchlist/${encodeURIComponent(ticker)}`, { methode: "DELETE" })
+        : await api("/api/watchlist", { methode: "POST", corps: { ticker } });
+      etat.watchlist = reponse.titres.map((t) => t.ticker);
+      return;
+    }
     const liste = lireWatchlist();
     const index = liste.indexOf(ticker);
     if (index >= 0) liste.splice(index, 1);
@@ -122,8 +141,58 @@
     ecrireWatchlist(liste);
   }
 
+  /* ----------------------------------------------------------- client API */
+  function lireJeton() {
+    const parametres = new URLSearchParams(window.location.search);
+    const depuisUrl = parametres.get("jeton");
+    if (depuisUrl) {
+      try {
+        sessionStorage.setItem("investassist.jeton", depuisUrl);
+      } catch (erreur) {
+        /* stockage refusé : le jeton vaut pour cette page seulement */
+      }
+      // Le jeton est retiré de la barre d'adresse : il ne doit pas finir
+      // dans un favori ni dans l'historique du navigateur.
+      window.history.replaceState({}, "", window.location.pathname);
+      return depuisUrl;
+    }
+    try {
+      return sessionStorage.getItem("investassist.jeton");
+    } catch (erreur) {
+      return null;
+    }
+  }
+
+  async function api(chemin, options = {}) {
+    const reponse = await fetch(chemin, {
+      method: options.methode || "GET",
+      headers: {
+        "X-Jeton": etat.jeton || "",
+        ...(options.corps ? { "Content-Type": "application/json" } : {}),
+      },
+      body: options.corps ? JSON.stringify(options.corps) : undefined,
+      cache: "no-store",
+    });
+    const charge = await reponse.json().catch(() => ({}));
+    if (!reponse.ok) {
+      throw new Error(charge.erreur || `HTTP ${reponse.status}`);
+    }
+    return charge;
+  }
+
   /* ------------------------------------------------------- chargement */
   async function charger() {
+    etat.jeton = lireJeton();
+    // Detection du mode : si l'API repond, l'interface active ses fonctions
+    // interactives ; sinon elle reste en lecture seule, comme hors ligne.
+    try {
+      etat.appli = await api("/api/etat");
+      etat.watchlist = (await api("/api/watchlist")).titres.map((t) => t.ticker);
+      activerOngletAlertes();
+    } catch (erreur) {
+      etat.appli = null;
+    }
+
     try {
       const [classement, historique] = await Promise.all([
         fetch("data/ranking.json", { cache: "no-cache" }).then((r) => {
@@ -176,11 +245,169 @@
     contenu.innerHTML = "";
     const vues = {
       classement: vueClassement,
+      alertes: vueAlertes,
       watchlist: vueWatchlist,
       exclus: vueExclus,
       methodologie: vueMethodologie,
     };
     (vues[etat.vue] || vueClassement)(contenu);
+  }
+
+  /* ---------------------------------------------------- barre d'analyse */
+  const LIBELLES_ALERTES = {
+    price_above: "Cours au-dessus d'un seuil",
+    price_below: "Cours au-dessous d'un seuil",
+    score_change: "Variation du score composite",
+    earnings_published: "Nouvelle publication de résultats",
+    top_n_entry: "Entrée dans le top N",
+    top_n_exit: "Sortie du top N",
+  };
+
+  function activerOngletAlertes() {
+    if (document.querySelector('nav.onglets button[data-vue="alertes"]')) return;
+    const nav = document.querySelector("nav.onglets");
+    const bouton = creer("button", null, "Alertes");
+    bouton.setAttribute("role", "tab");
+    bouton.dataset.vue = "alertes";
+    bouton.setAttribute("aria-selected", "false");
+    bouton.addEventListener("click", () => {
+      etat.vue = "alertes";
+      rendre();
+    });
+    // Placee avant l'onglet Méthodologie, qui reste le dernier.
+    const methodologie = document.querySelector('nav.onglets button[data-vue="methodologie"]');
+    nav.insertBefore(bouton, methodologie);
+  }
+
+  /**
+   * Commande de relance : selection des univers, cache, progression.
+   * Une analyse complete demande plusieurs minutes ; l'avancement est donc
+   * affiche titre par titre, sinon l'utilisateur croit l'outil bloque.
+   */
+  function barreAnalyse() {
+    const bloc = creer("div", "panneau");
+    const analyse = etat.analyse || (etat.appli && etat.appli.analyse) || {};
+
+    if (analyse.en_cours) {
+      const total = analyse.total || 0;
+      const fait = analyse.fait || 0;
+      bloc.append(creer("h3", null, "Analyse en cours"));
+      const piste = creer("div", "barre-piste");
+      const remplissage = creer("span");
+      remplissage.style.width = total ? `${Math.round((fait / total) * 100)}%` : "4%";
+      piste.append(remplissage);
+      bloc.append(piste);
+      bloc.append(
+        creer(
+          "p",
+          "note",
+          total
+            ? `${fait} / ${total} titres — ${analyse.ticker || "…"}`
+            : "Préparation…"
+        )
+      );
+      bloc.append(
+        creer(
+          "p",
+          "note-discrete",
+          "Vous pouvez continuer à consulter le classement précédent pendant le calcul."
+        )
+      );
+      return bloc;
+    }
+
+    bloc.append(creer("h3", null, "Relancer l'analyse"));
+
+    const univers = creer("div", "filtres");
+    (etat.appli.univers || []).forEach((bloc_univers) => {
+      const etiquette = creer("label", "etiquette");
+      const case_a_cocher = creer("input");
+      case_a_cocher.type = "checkbox";
+      case_a_cocher.value = bloc_univers.cle;
+      case_a_cocher.checked = (etat.universChoisis || etat.appli.univers_par_defaut || []).includes(
+        bloc_univers.cle
+      );
+      case_a_cocher.addEventListener("change", () => {
+        const choisis = new Set(
+          etat.universChoisis || etat.appli.univers_par_defaut || []
+        );
+        if (case_a_cocher.checked) choisis.add(bloc_univers.cle);
+        else choisis.delete(bloc_univers.cle);
+        etat.universChoisis = [...choisis];
+        rendre();
+      });
+      etiquette.append(case_a_cocher, creer("span", null, `${bloc_univers.libelle} (${bloc_univers.nombre})`));
+      univers.append(etiquette);
+    });
+    bloc.append(univers);
+
+    const options = creer("div", "filtres");
+    const etiquetteCache = creer("label", "etiquette");
+    const cache = creer("input");
+    cache.type = "checkbox";
+    cache.checked = etat.utiliserCache !== false;
+    cache.addEventListener("change", () => {
+      etat.utiliserCache = cache.checked;
+    });
+    etiquetteCache.append(cache, creer("span", null, "Utiliser les données en cache (12 h)"));
+    options.append(etiquetteCache);
+    bloc.append(options);
+
+    const choisis = etat.universChoisis || etat.appli.univers_par_defaut || [];
+    const nombre = (etat.appli.univers || [])
+      .filter((u) => choisis.includes(u.cle))
+      .reduce((somme, u) => somme + u.nombre, 0);
+
+    const lancer = creer("button", "bouton principal", "▶ Lancer l'analyse maintenant");
+    lancer.disabled = nombre === 0;
+    lancer.addEventListener("click", async () => {
+      lancer.disabled = true;
+      try {
+        await api("/api/analyse", {
+          methode: "POST",
+          corps: { univers: choisis, cache: etat.utiliserCache !== false },
+        });
+        suivreAnalyse();
+      } catch (erreur) {
+        alert(`Analyse impossible : ${erreur.message}`);
+        lancer.disabled = false;
+      }
+    });
+    bloc.append(lancer);
+    bloc.append(
+      creer(
+        "p",
+        "note-discrete",
+        nombre
+          ? `${nombre} titres — environ ${Math.max(1, Math.round((nombre * 3.5) / 60))} min ` +
+            "sans cache, beaucoup moins avec."
+          : "Sélectionnez au moins un univers."
+      )
+    );
+    return bloc;
+  }
+
+  /** Interroge l'avancement puis recharge les donnees a la fin. */
+  function suivreAnalyse() {
+    if (etat.suivi) clearInterval(etat.suivi);
+    etat.suivi = setInterval(async () => {
+      try {
+        const reponse = await api("/api/etat");
+        etat.appli = reponse;
+        etat.analyse = reponse.analyse;
+        if (!reponse.analyse.en_cours) {
+          clearInterval(etat.suivi);
+          etat.suivi = null;
+          await charger();
+          return;
+        }
+        rendre();
+      } catch (erreur) {
+        clearInterval(etat.suivi);
+        etat.suivi = null;
+      }
+    }, 2000);
+    rendre();
   }
 
   /* ------------------------------------------------------- classement */
@@ -230,6 +457,24 @@
       );
     }
     racine.append(carte);
+
+    if (etat.appli) {
+      const commande = creer("section", "carte");
+      commande.append(barreAnalyse());
+      const resume = (etat.analyse || {}).resume;
+      if (resume) {
+        commande.append(
+          creer(
+            "p",
+            "note",
+            `Dernière analyse : ${resume.classes} titres classés, ${resume.exclus} écartés, ` +
+              `${resume.echecs} non récupérés, en ${Math.round(resume.duree_secondes)} s` +
+              (resume.alertes ? ` — ${resume.alertes} alerte(s) déclenchée(s).` : ".")
+          )
+        );
+      }
+      racine.append(commande);
+    }
 
     const carteTable = creer("section", "carte");
     carteTable.append(filtres());
@@ -548,8 +793,13 @@
       estSuivi(titre.ticker) ? "★ Retirer de la watchlist" : "☆ Suivre ce titre"
     );
     bouton.style.marginLeft = "auto";
-    bouton.addEventListener("click", () => {
-      basculerWatchlist(titre.ticker);
+    bouton.addEventListener("click", async () => {
+      bouton.disabled = true;
+      try {
+        await basculerWatchlist(titre.ticker);
+      } finally {
+        bouton.disabled = false;
+      }
       rendre();
     });
     entete.append(bouton);
@@ -836,12 +1086,15 @@
       creer(
         "p",
         "note",
-        "Enregistrée dans ce navigateur uniquement (aucune donnée n'est transmise). " +
-          "Ajoutez un titre depuis le classement."
+        etat.appli
+          ? "Enregistrée dans le dossier de l'application : elle vous suit si vous " +
+            "copiez ce dossier sur un autre ordinateur."
+          : "Enregistrée dans ce navigateur uniquement (aucune donnée n'est transmise). " +
+            "Ajoutez un titre depuis le classement."
       )
     );
 
-    const suivis = lireWatchlist();
+    const suivis = listeSuivie();
     if (!suivis.length) {
       carte.append(creer("p", "etat-vide", "Aucun titre suivi pour le moment."));
       racine.append(carte);
@@ -884,9 +1137,9 @@
         ligne.append(cellule(`${titre.window_years} ans`, "num"));
       }
       const actions = creer("td");
-      const retirer = creer("button", "bouton", "Retirer");
-      retirer.addEventListener("click", () => {
-        basculerWatchlist(ticker);
+      const retirer = creer("button", "bouton discret", "Retirer");
+      retirer.addEventListener("click", async () => {
+        await basculerWatchlist(ticker);
         rendre();
       });
       actions.append(retirer);
@@ -978,6 +1231,161 @@
       carteEchecs.append(creer("p", "etat-vide", "Aucun échec lors de cette analyse."));
     }
     racine.append(carteEchecs);
+  }
+
+  /* ----------------------------------------------------------- alertes */
+  async function vueAlertes(racine) {
+    const carte = creer("section", "carte");
+    carte.append(creer("h2", null, "Alertes sur seuils personnels"));
+    carte.append(
+      creer(
+        "p",
+        "note",
+        "Une alerte signale le franchissement d'un seuil que vous définissez, à la fin " +
+          "de chaque analyse. Elle ne constitue ni une recommandation ni une incitation à agir."
+      )
+    );
+    racine.append(carte);
+
+    let donnees;
+    try {
+      donnees = await api("/api/alertes");
+    } catch (erreur) {
+      carte.append(creer("p", "etat-vide", `Alertes indisponibles : ${erreur.message}`));
+      return;
+    }
+    etat.alertes = donnees;
+
+    // ---- formulaire de creation ----------------------------------------
+    const formulaire = creer("div", "filtres");
+    const ticker = creer("input");
+    ticker.placeholder = "Ticker (ex. AIR.PA)";
+    ticker.setAttribute("aria-label", "Ticker");
+    ticker.style.paddingLeft = "12px";
+
+    const type = creer("select");
+    (donnees.types || []).forEach((cle) => {
+      const option = creer("option", null, LIBELLES_ALERTES[cle] || cle);
+      option.value = cle;
+      type.append(option);
+    });
+
+    const seuil = creer("input");
+    seuil.type = "number";
+    seuil.step = "0.01";
+    seuil.placeholder = "Seuil";
+    seuil.setAttribute("aria-label", "Seuil");
+    seuil.style.paddingLeft = "12px";
+    seuil.style.maxWidth = "140px";
+
+    const majParametre = () => {
+      const genre = type.value;
+      seuil.style.display = genre === "earnings_published" ? "none" : "";
+      seuil.placeholder =
+        genre === "score_change" ? "Écart en points" :
+        genre.startsWith("top_n") ? "N du top" : "Seuil de cours";
+    };
+    type.addEventListener("change", majParametre);
+    majParametre();
+
+    const creerRegle = creer("button", "bouton principal", "Créer la règle");
+    creerRegle.addEventListener("click", async () => {
+      const genre = type.value;
+      const valeur = parseFloat(seuil.value);
+      const parametres = {};
+      if (genre === "price_above" || genre === "price_below") parametres.threshold = valeur;
+      else if (genre === "score_change") parametres.threshold = valeur || 5;
+      else if (genre.startsWith("top_n")) parametres.n = Math.round(valeur || 20);
+      try {
+        await api("/api/alertes", {
+          methode: "POST",
+          corps: { ticker: ticker.value.trim().toUpperCase(), type: genre, parametres },
+        });
+        rendre();
+      } catch (erreur) {
+        alert(`Création impossible : ${erreur.message}`);
+      }
+    });
+
+    formulaire.append(ticker, type, seuil, creerRegle);
+    carte.append(formulaire);
+
+    // ---- regles existantes ---------------------------------------------
+    if (donnees.regles.length) {
+      const zone = creer("div", "zone-tableau");
+      const table = creer("table");
+      const thead = creer("thead");
+      const entete = creer("tr");
+      ["Ticker", "Type", "Paramètre", "État", ""].forEach((libelle) =>
+        entete.append(creer("th", "non-triable", libelle))
+      );
+      thead.append(entete);
+      table.append(thead);
+      const corps = creer("tbody");
+      donnees.regles.forEach((regle) => {
+        const ligne = creer("tr");
+        ligne.append(cellule(regle.ticker, "ticker"));
+        ligne.append(cellule(LIBELLES_ALERTES[regle.kind] || regle.kind));
+        ligne.append(
+          cellule(
+            Object.entries(regle.params || {})
+              .map(([cle, valeur]) => `${cle} : ${valeur}`)
+              .join(", ") || "—",
+            "secondaire"
+          )
+        );
+        ligne.append(
+          cellule(regle.last_state === "crossed" ? "seuil franchi" : "en veille", "secondaire")
+        );
+        const actions = creer("td");
+        const supprimer = creer("button", "bouton discret", "Supprimer");
+        supprimer.addEventListener("click", async () => {
+          await api(`/api/alertes/${regle.id}`, { methode: "DELETE" });
+          rendre();
+        });
+        actions.append(supprimer);
+        ligne.append(actions);
+        corps.append(ligne);
+      });
+      table.append(corps);
+      zone.append(table);
+      carte.append(creer("h3", null, "Règles configurées"));
+      carte.append(zone);
+    } else {
+      carte.append(creer("p", "etat-vide", "Aucune règle configurée."));
+    }
+
+    // ---- journal ---------------------------------------------------------
+    const journal = creer("section", "carte");
+    journal.append(creer("h2", null, "Journal des alertes"));
+    if (donnees.journal.length) {
+      const zone = creer("div", "zone-tableau");
+      const table = creer("table");
+      const thead = creer("thead");
+      const entete = creer("tr");
+      ["Date", "Ticker", "Type", "Message"].forEach((libelle) =>
+        entete.append(creer("th", "non-triable", libelle))
+      );
+      thead.append(entete);
+      table.append(thead);
+      const corps = creer("tbody");
+      donnees.journal.forEach((evenement) => {
+        const ligne = creer("tr");
+        ligne.append(cellule(dateLisible(evenement.triggered_at), "secondaire"));
+        ligne.append(cellule(evenement.ticker, "ticker"));
+        ligne.append(cellule(LIBELLES_ALERTES[evenement.kind] || evenement.kind));
+        const message = cellule(evenement.message);
+        message.style.whiteSpace = "normal";
+        ligne.append(message);
+        corps.append(ligne);
+      });
+      table.append(corps);
+      zone.append(table);
+      journal.append(zone);
+    } else {
+      journal.append(creer("p", "etat-vide", "Aucune alerte déclenchée à ce jour."));
+    }
+    racine.append(journal);
   }
 
   /* ------------------------------------------------------ methodologie */

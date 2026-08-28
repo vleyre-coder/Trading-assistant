@@ -1,10 +1,11 @@
-# Python 3.11+
-streamlit>=1.36
+# Python 3.11 ou plus récent.
+# Dépendances de l'application (moteur d'analyse + serveur local).
 pandas>=2.2
 numpy>=1.26
 yfinance>=0.2.40
 requests>=2.31
 PyYAML>=6.0
-plotly>=5.20
-APScheduler>=3.10
+
+# Développement : tests et construction de l'exécutable.
 pytest>=8.0
+pyinstaller>=6.0

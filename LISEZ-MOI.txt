@@ -1,0 +1,42 @@
+INVESTASSIST — analyse fondamentale
+===================================
+
+DEMARRAGE
+---------
+Double-cliquez sur Investassist.exe. Une fenetre noire s'ouvre, puis votre
+navigateur affiche l'application. Fermez la fenetre noire pour tout arreter.
+
+Si Windows affiche "Windows a protege votre ordinateur" : cliquez sur
+"Informations complementaires" puis "Executer quand meme". Le fichier vient
+d'Internet, Windows demande une confirmation.
+
+Si le navigateur ne s'ouvre pas, copiez l'adresse affichee dans la fenetre
+noire (elle ressemble a http://127.0.0.1:52341/?jeton=...).
+
+CE QUI EST CREE A COTE DE L'EXECUTABLE
+--------------------------------------
+  config/    vos reglages : ponderations, criteres, univers analyses
+  donnees/   votre historique, votre watchlist, vos alertes, le cache
+
+Copier CE DOSSIER ENTIER sur une cle USB puis sur un autre ordinateur suffit
+a y retrouver l'outil dans le meme etat, sans rien reinstaller.
+
+PREMIER REGLAGE CONSEILLE
+-------------------------
+Ouvrez config/settings.yaml avec le Bloc-notes et remplacez l'adresse email
+dans la ligne "user_agent". L'API publique de la SEC l'exige pour fournir les
+donnees officielles des societes americaines (cinq ans d'historique au lieu
+de quatre). Cette adresse n'est transmise qu'a la SEC.
+
+DUREE D'UNE ANALYSE
+-------------------
+Environ 3,5 secondes par titre sans cache : comptez 8 minutes pour les
+143 titres du CAC 40 et du Nasdaq-100. Les analyses suivantes sont bien plus
+rapides tant que le cache est valide (12 heures).
+
+AVERTISSEMENT
+-------------
+Classement calcule a partir de donnees fondamentales historiques et
+actuelles. Ne constitue pas un conseil en investissement ni une prediction de
+performance future. Les donnees proviennent de sources gratuites non
+auditees. Outil personnel, aucune diffusion a des tiers.

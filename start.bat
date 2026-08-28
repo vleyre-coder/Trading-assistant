@@ -1,9 +1,9 @@
 @echo off
 REM ====================================================================
-REM  Investassist - lancement sur Windows
-REM  Double-cliquez sur ce fichier.
-REM  Le premier lancement installe les dependances (quelques minutes) ;
-REM  les suivants sont immediats.
+REM  Investassist - lancement depuis les sources (Windows).
+REM  Pour une utilisation courante, preferez Investassist.exe : il n'a
+REM  besoin de rien d'autre. Ce script sert au developpement.
+REM  Le premier lancement installe les dependances (quelques minutes).
 REM ====================================================================
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -74,20 +74,13 @@ if "!AINSTALLER!"=="1" (
     echo   Installation terminee.
 )
 
-REM --- 4. Configuration du premier lancement ---------------------------
-%VPY% scripts\bootstrap.py
-
-REM --- 5. Demarrage ----------------------------------------------------
+REM --- 4. Demarrage ----------------------------------------------------
 echo.
-echo   Demarrage du tableau de bord...
-echo   Votre navigateur va s'ouvrir sur http://localhost:8501
+echo   Demarrage de l'application...
+echo   Votre navigateur va s'ouvrir automatiquement.
 echo   Pour quitter : fermez cette fenetre.
 echo.
-echo   Rappel : ce tableau de bord classe des titres selon des criteres
-echo   fondamentaux. Il ne constitue pas un conseil en investissement
-echo   ni une prediction de performance future.
-echo.
 
-%VPY% -m streamlit run app.py
+%VPY% lanceur.py %*
 
 pause
