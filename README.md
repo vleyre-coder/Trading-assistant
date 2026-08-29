@@ -31,15 +31,38 @@ avec le détail du calcul pour chaque titre.
 
 ### Le plus simple : l'exécutable Windows
 
-1. Téléchargez `Investassist.exe` depuis la page **Releases** du dépôt.
-2. Placez-le dans un dossier de votre choix — le Bureau, une clé USB, peu importe.
-3. Double-cliquez. Une fenêtre noire s'ouvre, puis le navigateur affiche
-   l'application.
+1. Téléchargez `Investassist-windows.zip` depuis la page **Releases** du dépôt.
+2. Décompressez-le dans un dossier de votre choix — le Bureau, une clé USB,
+   peu importe.
+3. Double-cliquez sur `Investassist.exe`. Un écran de démarrage s'affiche
+   pendant le chargement, puis le navigateur ouvre l'application.
 
 Aucune installation de Python, aucune dépendance : le fichier contient tout.
 Si Windows affiche « Windows a protégé votre ordinateur », cliquez sur
 **Informations complémentaires** puis **Exécuter quand même** — le fichier vient
 d'Internet, Windows demande une confirmation.
+
+### Icône sur le Bureau
+
+Double-cliquez **une fois** sur `Creer-un-raccourci-sur-le-Bureau.bat` : une
+icône Investassist apparaît sur votre Bureau et lance l'application
+directement. Le script est un simple raccourci Windows — rien n'est installé,
+rien n'est écrit dans le registre.
+
+### Ce que vous voyez au démarrage
+
+Un exécutable « un seul fichier » se déballe pendant une dizaine de secondes au
+premier lancement. Trois retours visuels comblent cette attente, pour qu'aucun
+moment ne donne l'impression que rien ne se passe :
+
+1. **Écran de démarrage** — logo, nom et message d'avancement, affichés dès le
+   double-clic par le lanceur de PyInstaller.
+2. **Fenêtre de console** — animation de progression pendant le démarrage du
+   serveur, puis l'adresse et les chemins effectifs.
+3. **Écran d'attente dans le navigateur** — présent dans le HTML lui-même, donc
+   affiché avant même l'exécution du script : aucune page blanche. Les
+   animations s'effacent si le système signale une préférence pour un mouvement
+   réduit.
 
 ### L'application est portable
 

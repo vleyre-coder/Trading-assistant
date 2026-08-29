@@ -82,8 +82,23 @@
 </div>
 
 <main class="enveloppe" id="contenu">
+  <!-- Écran d'attente présent dès le HTML : il s'affiche avant même que le
+       script ne s'exécute, donc sans page blanche au premier affichage. -->
   <section class="carte">
-    <p class="etat-vide">Chargement des données…</p>
+    <div class="chargement">
+      <svg class="chargement-logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="currentColor"/>
+        <g fill="#fff">
+          <rect x="8" y="17" width="4" height="8" rx="1.5"/>
+          <rect x="14" y="12" width="4" height="13" rx="1.5"/>
+          <rect x="20" y="7" width="4" height="18" rx="1.5"/>
+        </g>
+      </svg>
+      <div class="chargement-titre">Investassist</div>
+      <p class="chargement-message" role="status">Démarrage…</p>
+      <div class="chargement-piste"></div>
+      <div class="silhouette"><span></span><span></span><span></span><span></span></div>
+    </div>
   </section>
 </main>
 

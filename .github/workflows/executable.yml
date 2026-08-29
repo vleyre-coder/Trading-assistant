@@ -43,6 +43,12 @@ jobs:
         run: python -m pytest tests/ -q
         continue-on-error: false
 
+      - name: Vérifier que l'écran de démarrage sera bien inclus
+        # Il repose sur tkinter. Fourni avec Python sous Windows, mais son
+        # absence ferait silencieusement disparaître l'écran : autant le
+        # constater ici plutôt que sur le poste de l'utilisateur.
+        run: python -c "import tkinter; print('tkinter', tkinter.TkVersion)"
+
       - name: Construire l'exécutable
         run: python -m PyInstaller investassist.spec --noconfirm
 
@@ -76,9 +82,12 @@ jobs:
       - name: Préparer le dossier à distribuer
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path paquet -Force | Out-Null
+          New-Item -ItemType Directory -Path paquet\assets -Force | Out-Null
           Copy-Item dist\Investassist.exe paquet\
           Copy-Item LISEZ-MOI.txt paquet\ -ErrorAction SilentlyContinue
+          Copy-Item "Creer-un-raccourci-sur-le-Bureau.bat" paquet\ -ErrorAction SilentlyContinue
+          # L'icone accompagne l'executable pour le raccourci du Bureau.
+          Copy-Item assets\investassist.ico paquet\assets\ -ErrorAction SilentlyContinue
           Compress-Archive -Path paquet\* -DestinationPath Investassist-windows.zip -Force
 
       - name: Conserver l'exécutable en artefact
@@ -98,10 +107,17 @@ jobs:
           body: |
             Application Investassist pour Windows.
 
-            Téléchargez `Investassist.exe`, placez-le dans un dossier de votre
-            choix, puis double-cliquez. Les réglages et les données sont créés
-            à côté de l'exécutable : copier ce dossier suffit à emporter
-            l'outil, son historique et sa watchlist sur un autre ordinateur.
+            Téléchargez `Investassist-windows.zip`, décompressez-le dans un
+            dossier de votre choix, puis double-cliquez sur `Investassist.exe`.
+            Un écran de démarrage s'affiche pendant le chargement, puis
+            l'application s'ouvre dans votre navigateur.
+
+            Pour un lancement depuis le Bureau : double-cliquez une fois sur
+            `Creer-un-raccourci-sur-le-Bureau.bat`.
+
+            Les réglages et les données sont créés à côté de l'exécutable :
+            copier ce dossier suffit à emporter l'outil, son historique et sa
+            watchlist sur un autre ordinateur.
 
             Classement calculé à partir de données fondamentales historiques et
             actuelles. Ne constitue pas un conseil en investissement ni une

@@ -141,6 +141,50 @@
     ecrireWatchlist(liste);
   }
 
+  /* ------------------------------------------------------- chargement visuel */
+  /**
+   * Écran d'attente : logo qui respire, barre indéterminée et silhouette du
+   * tableau à venir. Il occupe la place du contenu pour que rien ne saute
+   * lorsqu'il cède la place aux vraies données.
+   */
+  function ecranChargement(message = "Préparation de l'analyse…") {
+    const bloc = creer("section", "carte");
+    const boite = creer("div", "chargement");
+
+    const logo = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    logo.setAttribute("class", "chargement-logo");
+    logo.setAttribute("viewBox", "0 0 32 32");
+    logo.setAttribute("aria-hidden", "true");
+    logo.innerHTML =
+      '<rect width="32" height="32" rx="8" fill="currentColor"/>' +
+      '<g fill="#fff">' +
+      '<rect x="8" y="17" width="4" height="8" rx="1.5"/>' +
+      '<rect x="14" y="12" width="4" height="13" rx="1.5"/>' +
+      '<rect x="20" y="7" width="4" height="18" rx="1.5"/>' +
+      "</g>";
+    boite.append(logo);
+
+    boite.append(creer("div", "chargement-titre", "Investassist"));
+    const message_noeud = creer("p", "chargement-message", message);
+    message_noeud.setAttribute("role", "status");
+    message_noeud.setAttribute("aria-live", "polite");
+    boite.append(message_noeud);
+    boite.append(creer("div", "chargement-piste"));
+
+    const silhouette = creer("div", "silhouette");
+    for (let index = 0; index < 4; index += 1) silhouette.append(creer("span"));
+    boite.append(silhouette);
+
+    bloc.append(boite);
+    return bloc;
+  }
+
+  function afficherChargement(message) {
+    const contenu = $("#contenu");
+    contenu.innerHTML = "";
+    contenu.append(ecranChargement(message));
+  }
+
   /* ----------------------------------------------------------- client API */
   function lireJeton() {
     const parametres = new URLSearchParams(window.location.search);
@@ -183,12 +227,16 @@
   /* ------------------------------------------------------- chargement */
   async function charger() {
     etat.jeton = lireJeton();
+    if (!etat.donnees) {
+      afficherChargement("Connexion à l'application…");
+    }
     // Detection du mode : si l'API repond, l'interface active ses fonctions
     // interactives ; sinon elle reste en lecture seule, comme hors ligne.
     try {
       etat.appli = await api("/api/etat");
       etat.watchlist = (await api("/api/watchlist")).titres.map((t) => t.ticker);
       activerOngletAlertes();
+      afficherChargement("Lecture du dernier classement…");
     } catch (erreur) {
       etat.appli = null;
     }
@@ -242,7 +290,15 @@
       bouton.setAttribute("aria-selected", String(bouton.dataset.vue === etat.vue));
     });
     const contenu = $("#contenu");
+    const premierAffichage = !contenu.dataset.pret;
     contenu.innerHTML = "";
+    if (premierAffichage) {
+      // Fondu à la première apparition seulement : le répéter à chaque
+      // interaction donnerait une interface qui clignote.
+      contenu.classList.add("contenu-apparait");
+      contenu.dataset.pret = "1";
+      setTimeout(() => contenu.classList.remove("contenu-apparait"), 400);
+    }
     const vues = {
       classement: vueClassement,
       alertes: vueAlertes,

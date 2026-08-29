@@ -4,6 +4,11 @@ REM Double-cliquez sur ce fichier.
 setlocal
 cd /d "%~dp0"
 
+REM Console en UTF-8 : sans cela, un simple caractere accentue interrompt
+REM le script et la fenetre se referme avant tout message lisible.
+chcp 65001 >nul 2>&1
+set "PYTHONIOENCODING=utf-8"
+
 set "PYEXE="
 py -3 -c "import sys; sys.exit(0)" >nul 2>&1 && set "PYEXE=py -3"
 if not defined PYEXE (
@@ -17,3 +22,10 @@ if not defined PYEXE (
 )
 
 %PYEXE% scripts\publier.py %*
+set "CODE=%ERRORLEVEL%"
+
+REM Pause systematique : une erreur doit rester lisible, meme lorsque le
+REM script est lance par double-clic.
+echo.
+if not "%CODE%"=="0" echo   Le script s'est termine avec le code %CODE%.
+pause

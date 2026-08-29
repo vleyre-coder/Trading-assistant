@@ -3,8 +3,15 @@ INVESTASSIST — analyse fondamentale
 
 DEMARRAGE
 ---------
-Double-cliquez sur Investassist.exe. Une fenetre noire s'ouvre, puis votre
+Double-cliquez sur Investassist.exe. Un ecran de demarrage apparait pendant
+le chargement (une dizaine de secondes au premier lancement), puis votre
 navigateur affiche l'application. Fermez la fenetre noire pour tout arreter.
+
+RACCOURCI SUR LE BUREAU
+-----------------------
+Double-cliquez UNE FOIS sur "Creer-un-raccourci-sur-le-Bureau.bat" : une
+icone Investassist apparait sur votre Bureau et lance l'application
+directement.
 
 Si Windows affiche "Windows a protege votre ordinateur" : cliquez sur
 "Informations complementaires" puis "Executer quand meme". Le fichier vient

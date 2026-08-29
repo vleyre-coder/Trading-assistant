@@ -33,16 +33,29 @@ from investassist.chemins import (  # noqa: E402
     resume,
 )
 from investassist.config import load_scoring, load_settings  # noqa: E402
+from investassist.demarrage import Animation, EcranDemarrage  # noqa: E402
 from investassist.disclaimers import MAIN  # noqa: E402
 from investassist.serveur import demarrer  # noqa: E402
 
 LARGEUR = 74
 
 
+def raccourcir(chemin: str, largeur: int) -> str:
+    """Abrège un chemin trop long par le milieu, en gardant début et fin."""
+    if len(chemin) <= largeur:
+        return chemin
+    garde = (largeur - 3) // 2
+    return f"{chemin[:garde]}...{chemin[-(largeur - 3 - garde):]}"
+
+
 def bandeau(lignes: list[str]) -> None:
+    """Encadré de démarrage. Les lignes trop longues sont abrégées : un
+    chemin à rallonge déformerait le cadre et donnerait un aspect bâclé."""
+    utile = LARGEUR - 4
     print("┌" + "─" * (LARGEUR - 2) + "┐")
     for ligne in lignes:
-        print("│ " + ligne.ljust(LARGEUR - 4) + " │")
+        texte = ligne if len(ligne) <= utile else raccourcir(ligne, utile)
+        print("│ " + texte.ljust(utile) + " │")
     print("└" + "─" * (LARGEUR - 2) + "┘")
 
 
@@ -106,6 +119,9 @@ def main() -> int:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("peewee").setLevel(logging.WARNING)
 
+    ecran = EcranDemarrage()
+    ecran.message("Préparation des réglages…")
+
     preparer_configuration()
 
     # Base, cache et exports vivent dans le dossier portable, jamais dans le
@@ -115,12 +131,16 @@ def main() -> int:
     os.environ.setdefault("INVESTASSIST_DB", str(donnees / "investassist.sqlite"))
     os.environ.setdefault("INVESTASSIST_CACHE_DIR", str(donnees / "cache"))
 
+    ecran.message("Chargement de la configuration…")
     settings = load_settings(dossier_configuration() / "settings.yaml")
     cfg = load_scoring(dossier_configuration() / "scoring.yaml")
 
+    ecran.message("Démarrage du serveur local…")
     try:
-        serveur, app, _ = demarrer(settings, cfg, port=arguments.port)
+        with Animation("Démarrage du serveur local"):
+            serveur, app, _ = demarrer(settings, cfg, port=arguments.port)
     except OSError as exc:
+        ecran.fermer()
         print(f"\n  Impossible de démarrer le serveur local : {exc}")
         input("\n  Appuyez sur Entrée pour fermer.")
         return 1
@@ -137,8 +157,8 @@ def main() -> int:
         "personnelle ne quitte cette machine.",
         "",
         f"Adresse    : http://127.0.0.1:{port}",
-        f"Données    : {chemins['donnees']}",
-        f"Réglages   : {chemins['configuration']}",
+        f"Données    : {raccourcir(chemins['donnees'], LARGEUR - 17)}",
+        f"Réglages   : {raccourcir(chemins['configuration'], LARGEUR - 17)}",
         "",
         "Fermez cette fenêtre pour arrêter l'application.",
     ])
@@ -153,7 +173,12 @@ def main() -> int:
     print(f"  {adresse}")
     print()
     if not arguments.sans_navigateur:
+        ecran.message("Ouverture du navigateur…")
         threading.Timer(0.6, lambda: webbrowser.open(adresse)).start()
+
+    # L'écran de démarrage disparaît une fois l'interface réellement prête,
+    # pas avant : il doit couvrir toute l'attente, sans la prolonger.
+    threading.Timer(1.2, ecran.fermer).start()
 
     try:
         while True:
@@ -161,6 +186,7 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\n  Arrêt demandé.")
     finally:
+        ecran.fermer()
         serveur.shutdown()
         serveur.server_close()
 

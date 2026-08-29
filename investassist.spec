@@ -9,6 +9,18 @@ l'outil, son historique et sa watchlist sur une autre machine.
 """
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
+# L'ecran de demarrage de PyInstaller repose sur tkinter. Il est fourni avec
+# Python sous Windows, mais absent de certaines installations Linux. La
+# construction ne doit pas echouer pour autant : on s'en passe alors, sans
+# rien changer au fonctionnement de l'application.
+try:
+    import tkinter  # noqa: F401
+
+    ECRAN_DISPONIBLE = True
+except ImportError:
+    ECRAN_DISPONIBLE = False
+    print("PyInstaller : tkinter absent, construction sans ecran de demarrage.")
+
 donnees = [
     # Configuration par defaut : recopiee a cote de l'executable au premier
     # lancement, pour rester modifiable sans reconstruction.
@@ -23,6 +35,9 @@ donnees = [
     # l'ouverture, clairement date, sans attendre une premiere analyse.
     ("web/data/ranking.json", "web/data"),
     ("web/data/history.json", "web/data"),
+    # Icone : reutilisee par le raccourci du Bureau et par l'interface.
+    ("assets/investassist.ico", "assets"),
+    ("assets/investassist.png", "assets"),
 ]
 
 binaires = []
@@ -54,17 +69,44 @@ analyse = Analysis(
     # exclure divise la taille de l'executable par plus de deux.
     excludes=[
         "streamlit", "plotly", "matplotlib", "pytest", "playwright",
-        "tkinter", "PyQt5", "PyQt6", "PySide2", "PySide6", "IPython",
+        "PyQt5", "PyQt6", "PySide2", "PySide6", "IPython",
         "notebook", "jupyter", "sphinx", "scipy",
+        # tkinter n'est exclu que lorsqu'il ne sert pas : l'ecran de
+        # demarrage en depend.
+        *([] if ECRAN_DISPONIBLE else ["tkinter"]),
     ],
     noarchive=False,
 )
 
 pyz = PYZ(analyse.pure)
 
+# Écran de démarrage : un exécutable « un seul fichier » met une dizaine de
+# secondes à se déballer avant d'afficher quoi que ce soit. Sans cet écran,
+# rien ne se passe à l'écran et l'utilisateur double-clique une seconde fois.
+# Le texte est mis à jour par le programme au fil des étapes.
+demarrage = (
+    Splash(
+        "assets/demarrage.png",
+        binaries=analyse.binaries,
+        datas=analyse.datas,
+        text_pos=(36, 170),
+        text_size=9,
+        text_color="#52514e",
+        text_default="Demarrage...",
+        minify_script=True,
+        always_on_top=True,
+    )
+    if ECRAN_DISPONIBLE
+    else None
+)
+
+# Les elements de l'ecran de demarrage ne sont ajoutes que s'il existe.
+elements_ecran = [demarrage, demarrage.binaries] if demarrage else []
+
 exe = EXE(
     pyz,
     analyse.scripts,
+    *elements_ecran,
     analyse.binaries,
     analyse.datas,
     [],
@@ -78,5 +120,5 @@ exe = EXE(
     # les erreurs eventuelles. La masquer rendrait tout diagnostic impossible.
     console=True,
     disable_windowed_traceback=False,
-    icon=None,
+    icon="assets/investassist.ico",
 )

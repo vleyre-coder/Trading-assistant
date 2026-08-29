@@ -66,6 +66,31 @@ def test_recette_d_empaquetage_embarque_l_essentiel():
     assert '"lanceur.py"' in recette
     # Les bibliotheques de l'ancienne interface alourdiraient l'executable.
     assert '"streamlit"' in recette and '"plotly"' in recette
+    # Identité visuelle : icône de l'exécutable et écran de démarrage.
+    assert 'icon="assets/investassist.ico"' in recette
+    assert "Splash(" in recette and "assets/demarrage.png" in recette
+    # L'écran de démarrage dépend de tkinter : sa construction doit rester
+    # possible sur une machine qui ne l'a pas.
+    assert "ECRAN_DISPONIBLE" in recette
+
+
+def test_ressources_visuelles_presentes():
+    for fichier in ("assets/investassist.ico", "assets/investassist.png",
+                    "assets/demarrage.png"):
+        chemin = ROOT / fichier
+        assert chemin.exists(), f"ressource manquante : {fichier}"
+        assert chemin.stat().st_size > 500, f"ressource vide : {fichier}"
+
+
+def test_raccourci_bureau():
+    script = ROOT / "Creer-un-raccourci-sur-le-Bureau.bat"
+    assert script.exists()
+    contenu = script.read_bytes()
+    # Un .bat en LF échoue sur certaines consoles Windows.
+    assert b"\r\n" in contenu
+    texte = contenu.decode("utf-8")
+    assert "Investassist.exe" in texte and "IconLocation" in texte
+    assert "pause" in texte, "toute erreur doit rester lisible"
 
 
 def test_workflow_de_construction():

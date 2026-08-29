@@ -17,12 +17,25 @@ Windows, ou GitHub Desktop).
 from __future__ import annotations
 
 import argparse
+import glob
 import json
+import os
 import shutil
 import subprocess
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
+
+# Les consoles Windows héritées (cp850, cp437) ne savent pas afficher les
+# caractères typographiques. Sans ce réglage, un simple tiret de séparation
+# provoque une UnicodeEncodeError : le script s'arrête et, lancé par
+# double-clic, la fenêtre se referme avant qu'on ait pu lire quoi que ce soit.
+for _flux in (sys.stdout, sys.stderr):
+    try:
+        _flux.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 RACINE = Path(__file__).resolve().parents[1]
 MEMOIRE = RACINE / "donnees" / "publication.json"
@@ -40,12 +53,46 @@ IGNORES = [
 ]
 
 
+def trouver_git() -> str | None:
+    """Localise git, y compris celui fourni par GitHub Desktop.
+
+    GitHub Desktop installe son propre Git mais ne l'ajoute PAS au PATH du
+    système : un utilisateur qui n'a installé que GitHub Desktop verrait donc
+    « Git n'est pas installé » alors qu'il l'a bel et bien.
+    """
+    chemin = shutil.which("git")
+    if chemin:
+        return chemin
+    if sys.platform != "win32":
+        return None
+    candidats: list[str] = []
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        candidats += sorted(
+            glob.glob(os.path.join(local, "GitHubDesktop", "app-*", "resources", "app",
+                                   "git", "cmd", "git.exe")),
+            reverse=True,  # la version la plus récente d'abord
+        )
+    candidats += [
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files (x86)\Git\cmd\git.exe",
+    ]
+    for candidat in candidats:
+        if os.path.isfile(candidat):
+            return candidat
+    return None
+
+
+GIT = trouver_git()
+
+
 def executer(*arguments: str, silencieux: bool = False) -> subprocess.CompletedProcess:
+    commande = [GIT or "git", *arguments]
     return subprocess.run(
-        ["git", *arguments], cwd=RACINE, capture_output=True, text=True,
+        commande, cwd=RACINE, capture_output=True, text=True,
         check=False, encoding="utf-8", errors="replace",
     ) if silencieux else subprocess.run(
-        ["git", *arguments], cwd=RACINE, text=True, check=False,
+        commande, cwd=RACINE, text=True, check=False,
     )
 
 
@@ -170,15 +217,18 @@ def main() -> int:
     interactif = not arguments.sans_question
     print()
     print("  Publication vers GitHub")
-    print("  " + "─" * 58)
+    print("  " + "-" * 58)
 
-    if shutil.which("git") is None:
-        print("\n  Git n'est pas installé sur cet ordinateur.")
-        print("  Windows : https://git-scm.com/download/win  (laisser les options par défaut)")
+    if GIT is None:
+        print("\n  Git est introuvable sur cet ordinateur.")
+        print("  Windows : https://git-scm.com/download/win  (laisser les options par defaut)")
         print("  macOS   : xcode-select --install")
+        print("\n  Si vous avez installe GitHub Desktop, son Git n'est pas ajoute au")
+        print("  PATH du systeme : installez Git separement avec le lien ci-dessus.")
         print("\n  Installez-le puis relancez ce script.")
         pause(interactif)
         return 1
+    print(f"  Git utilisé : {GIT}")
 
     memoire = charger_memoire()
     depot = arguments.depot or memoire.get("depot") or DEPOT_PROPOSE
@@ -215,7 +265,7 @@ def main() -> int:
         print(f"\n  ATTENTION — {len(suppressions)} fichier(s) présent(s) sur le dépôt")
         print("  seraient SUPPRIMÉS, car absents de ce dossier :")
         for chemin in suppressions[:12]:
-            print(f"    ✕ {chemin}")
+            print(f"    [x] {chemin}")
         if len(suppressions) > 12:
             print(f"    … et {len(suppressions) - 12} autre(s)")
         print("\n  Cela arrive quand ce dossier vient d'une archive ZIP qui ne")
@@ -228,9 +278,9 @@ def main() -> int:
         if not accord.lower().startswith("o"):
             print("\n  Publication annulée : rien n'a été envoyé.")
             print("  Deux solutions :")
-            print("   • récupérer d'abord le dépôt complet (git clone) puis y refaire")
-            print("     vos modifications — c'est la voie recommandée ;")
-            print("   • ou relancer avec --autoriser-suppressions si la suppression")
+            print("   - recuperer d'abord le dépôt complet (git clone) puis y refaire")
+            print("     vos modifications - c'est la voie recommandee ;")
+            print("   - ou relancer avec --autoriser-suppressions si la suppression")
             print("     est bien ce que vous voulez.")
             executer("reset", "-q", silencieux=True)
             pause(interactif)
@@ -267,5 +317,34 @@ def main() -> int:
     return 0
 
 
+def journaliser(texte: str) -> None:
+    """Consigne le déroulement dans donnees/publication.log.
+
+    Filet de sécurité : si la fenêtre se referme malgré tout, le message
+    d'erreur reste consultable dans ce fichier.
+    """
+    try:
+        journal = RACINE / "donnees" / "publication.log"
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        with journal.open("a", encoding="utf-8") as fichier:
+            fichier.write(f"\n===== {datetime.now():%d/%m/%Y %H:%M:%S} =====\n{texte}\n")
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        code = main()
+    except Exception:  # noqa: BLE001 - toute erreur doit rester lisible
+        trace = traceback.format_exc()
+        print("\n  Une erreur inattendue s'est produite :\n")
+        print(trace)
+        journaliser(trace)
+        print(f"  Détail également enregistré dans donnees/publication.log")
+        try:
+            if sys.stdin and sys.stdin.isatty():
+                input("\n  Appuyez sur Entrée pour fermer.")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        code = 1
+    raise SystemExit(code)

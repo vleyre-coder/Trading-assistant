@@ -462,3 +462,81 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
   .filtres .compteur { margin-left: 0; width: 100%; }
   .indicateur .valeur { font-size: 1.4rem; }
 }
+
+/* =====================================================================
+   Écran de chargement
+   ---------------------------------------------------------------------
+   Affiché le temps que les données arrivent. Il occupe la place exacte du
+   contenu à venir, pour éviter le sursaut de mise en page quand il
+   disparaît. Toute animation est désactivée si le système signale une
+   préférence pour un mouvement réduit.
+   ===================================================================== */
+.chargement {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; padding: 72px 24px; text-align: center;
+  animation: apparition 0.3s ease-out;
+}
+
+.chargement-logo {
+  width: 56px; height: 56px; color: var(--series);
+  animation: respiration 1.8s ease-in-out infinite;
+}
+
+.chargement-titre { font-size: 1rem; font-weight: 620; letter-spacing: -0.01em; }
+.chargement-message { font-size: 0.86rem; color: var(--ink-secondary); margin: 0; }
+
+/* Barre indéterminée : la progression réelle est inconnue, la barre
+   indique seulement que le travail est en cours. */
+.chargement-piste {
+  width: min(280px, 70vw); height: 4px; border-radius: 2px;
+  background: var(--grid); overflow: hidden; position: relative;
+}
+.chargement-piste::after {
+  content: ""; position: absolute; inset: 0;
+  width: 40%; border-radius: 2px; background: var(--series);
+  animation: glissement 1.25s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* Silhouette du tableau à venir : la page ne saute pas au moment où les
+   vraies lignes s'affichent. */
+.silhouette { display: grid; gap: 9px; width: 100%; max-width: 760px; margin-top: 10px; }
+.silhouette span {
+  height: 13px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--grid) 25%, var(--surface-alt) 50%, var(--grid) 75%);
+  background-size: 200% 100%;
+  animation: balayage 1.4s ease-in-out infinite;
+}
+.silhouette span:nth-child(1) { width: 92%; }
+.silhouette span:nth-child(2) { width: 78%; animation-delay: 0.1s; }
+.silhouette span:nth-child(3) { width: 85%; animation-delay: 0.2s; }
+.silhouette span:nth-child(4) { width: 64%; animation-delay: 0.3s; }
+
+@keyframes apparition { from { opacity: 0; } to { opacity: 1; } }
+@keyframes respiration {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.08); opacity: 0.75; }
+}
+@keyframes glissement {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+@keyframes balayage {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Le contenu apparaît en fondu : la bascule depuis l'écran de chargement
+   est perçue comme une transition, non comme un clignotement. */
+.contenu-apparait { animation: montee 0.34s cubic-bezier(0.2, 0.7, 0.3, 1); }
+@keyframes montee {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chargement, .chargement-logo, .chargement-piste::after,
+  .silhouette span, .contenu-apparait {
+    animation: none !important;
+  }
+  .chargement-piste::after { width: 100%; opacity: 0.5; }
+}
