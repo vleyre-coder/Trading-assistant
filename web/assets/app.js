@@ -201,10 +201,18 @@
       return depuisUrl;
     }
     try {
-      return sessionStorage.getItem("investassist.jeton");
+      const memorise = sessionStorage.getItem("investassist.jeton");
+      if (memorise) return memorise;
     } catch (erreur) {
-      return null;
+      /* stockage refusé : on se rabat sur le cookie */
     }
+    // Le serveur local dépose le jeton en cookie à l'ouverture : recharger
+    // l'adresse sans le jeton continue donc de fonctionner.
+    const cookie = document.cookie
+      .split(";")
+      .map((morceau) => morceau.trim().split("="))
+      .find(([nom]) => nom === "investassist_jeton");
+    return cookie ? cookie[1] : null;
   }
 
   async function api(chemin, options = {}) {
@@ -239,6 +247,9 @@
       afficherChargement("Lecture du dernier classement…");
     } catch (erreur) {
       etat.appli = null;
+      // 403 alors que la page vient bien de l'application : le jeton manque.
+      // Mieux vaut le dire que de retirer silencieusement des fonctions.
+      etat.jetonManquant = /403|jeton/i.test(erreur.message || "");
     }
 
     try {
@@ -469,6 +480,22 @@
   /* ------------------------------------------------------- classement */
   function vueClassement(racine) {
     const donnees = etat.donnees;
+
+    if (etat.jetonManquant) {
+      const alerte = creer("section", "carte");
+      alerte.append(
+        encart(
+          "attention",
+          "!",
+          "Mode lecture seule : cette page a été ouverte sans son jeton d'accès. " +
+            "Le classement reste consultable, mais relancer une analyse ou " +
+            "modifier la watchlist demande de rouvrir l'application depuis son " +
+            "icône (ou depuis l'adresse affichée dans la fenêtre noire)."
+        )
+      );
+      racine.append(alerte);
+    }
+
     const carte = creer("section", "carte");
 
     const entete = creer("div", "carte-entete");

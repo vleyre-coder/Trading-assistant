@@ -8,6 +8,7 @@ donc aucun appel reseau vers les sources financieres.
 from __future__ import annotations
 
 import json
+import pathlib
 import urllib.error
 import urllib.request
 
@@ -159,3 +160,64 @@ def test_analyse_sans_univers_refusee(serveur_local, monkeypatch):
     monkeypatch.setattr("investassist.serveur.load_universes", lambda: {"default_selection": []})
     assert statut(socle, "/api/analyse", jeton=app.jeton, methode="POST",
                   corps={"univers": []}) == 400
+
+
+# ----------------------------------------------------- jeton par cookie
+def test_le_jeton_de_l_url_devient_un_cookie(serveur_local):
+    """L'utilisateur ne saisit jamais rien : l'application ouvre l'adresse
+    avec son jeton, et le serveur le convertit en cookie de session pour que
+    recharger l'adresse nue continue de fonctionner."""
+    socle, app = serveur_local
+    requete = urllib.request.Request(f"{socle}/?jeton={app.jeton}")
+    with urllib.request.urlopen(requete, timeout=20) as reponse:
+        cookie = reponse.headers.get("Set-Cookie") or ""
+    assert f"investassist_jeton={app.jeton}" in cookie
+    assert "SameSite=Strict" in cookie, "un cookie laxiste rouvrirait la porte aux sites tiers"
+
+
+def test_aucun_cookie_sans_jeton_valide(serveur_local):
+    socle, _ = serveur_local
+    for adresse in ("/", "/?jeton=faux"):
+        with urllib.request.urlopen(socle + adresse, timeout=20) as reponse:
+            assert reponse.headers.get("Set-Cookie") is None
+
+
+def test_api_acceptee_avec_le_cookie(serveur_local):
+    socle, app = serveur_local
+    requete = urllib.request.Request(
+        socle + "/api/etat", headers={"Cookie": f"investassist_jeton={app.jeton}"}
+    )
+    with urllib.request.urlopen(requete, timeout=20) as reponse:
+        assert reponse.status == 200
+
+
+def test_cookie_invalide_refuse(serveur_local):
+    socle, _ = serveur_local
+    assert statut(socle, "/api/etat", jeton=None) == 403
+    requete = urllib.request.Request(
+        socle + "/api/etat", headers={"Cookie": "investassist_jeton=faux"}
+    )
+    try:
+        urllib.request.urlopen(requete, timeout=20)
+        raise AssertionError("un cookie invalide ne doit pas ouvrir l'API")
+    except urllib.error.HTTPError as erreur:
+        assert erreur.code == 403
+
+
+def test_configuration_lue_par_le_module_chemins():
+    """Régression : les univers étaient chargés depuis un chemin déduit de
+    l'emplacement du code source. Dans un exécutable, ce chemin pointe vers un
+    dossier temporaire inexistant et toute l'API tombait."""
+    from investassist import config as configuration
+
+    source = (
+        pathlib.Path(configuration.__file__).read_text(encoding="utf-8")
+    )
+    assert "dossier_configuration()" in source
+    assert "Path(__file__).resolve().parents[2]" not in source, (
+        "un chemin déduit du fichier source ne survit pas à l'empaquetage"
+    )
+    # Les trois lectures doivent passer par la résolution commune.
+    for fonction in ("load_scoring", "load_universes"):
+        bloc = source.split(f"def {fonction}")[1].split("\n\n")[0]
+        assert "dossier_configuration()" in bloc, f"{fonction} ignore la résolution"

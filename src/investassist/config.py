@@ -9,8 +9,14 @@ from typing import Any
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = PROJECT_ROOT / "config"
+from .chemins import dossier_configuration, racine_installation
+
+# Dans un executable, le code vit dans un dossier temporaire : un chemin
+# deduit de l'emplacement du fichier source pointerait vers /tmp/config, qui
+# n'existe pas. La resolution passe donc par le module chemins, seul a
+# connaitre les trois modes d'execution.
+PROJECT_ROOT = racine_installation()
+CONFIG_DIR = dossier_configuration()
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -78,7 +84,7 @@ class ScoringConfig:
 
 
 def load_scoring(path: Path | None = None) -> ScoringConfig:
-    raw = _read_yaml(path or CONFIG_DIR / "scoring.yaml")
+    raw = _read_yaml(path or dossier_configuration() / "scoring.yaml")
     criteria: dict[str, Criterion] = {}
     for key, spec in (raw.get("criteria") or {}).items():
         if not isinstance(spec, dict):  # p.ex. no_dividend_score
@@ -146,9 +152,10 @@ def load_settings(path: Path | None = None) -> Settings:
     Les variables d'environnement ont priorite (utile pour un cron ou pour
     eviter d'ecrire une cle API dans un fichier).
     """
-    path = path or CONFIG_DIR / "settings.yaml"
+    dossier = dossier_configuration()
+    path = path or dossier / "settings.yaml"
     if not path.exists():
-        path = CONFIG_DIR / "settings.example.yaml"
+        path = dossier / "settings.example.yaml"
     raw = _read_yaml(path)
 
     sec = raw.get("sec") or {}
@@ -162,7 +169,7 @@ def load_settings(path: Path | None = None) -> Settings:
 
     def _abs(p: str) -> Path:
         q = Path(p)
-        return q if q.is_absolute() else PROJECT_ROOT / q
+        return q if q.is_absolute() else racine_installation() / q
 
     # Configuration SMTP par variables d'environnement : indispensable pour une
     # execution automatisee (GitHub Actions), ou les identifiants proviennent
@@ -217,7 +224,7 @@ def load_settings(path: Path | None = None) -> Settings:
 
 
 def load_universes(path: Path | None = None) -> dict[str, Any]:
-    return _read_yaml(path or CONFIG_DIR / "universes.yaml")
+    return _read_yaml(path or dossier_configuration() / "universes.yaml")
 
 
 @lru_cache(maxsize=1)

@@ -38,6 +38,7 @@ from .storage import ALERT_KINDS, Database, score_from_row
 log = logging.getLogger(__name__)
 
 VERSION_API = 1
+NOM_COOKIE = "investassist_jeton"
 
 
 class Application:
@@ -202,10 +203,19 @@ def construire_gestionnaire(app: Application):
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
             log.debug("%s - %s", self.address_string(), format % args)
 
-        def _repondre(self, code: int, corps: bytes, type_mime: str) -> None:
+        def _repondre(self, code: int, corps: bytes, type_mime: str,
+                      poser_cookie: bool = False) -> None:
             self.send_response(code)
             self.send_header("Content-Type", type_mime)
             self.send_header("Content-Length", str(len(corps)))
+            if poser_cookie:
+                # Le jeton devient un cookie de session : rouvrir l'adresse
+                # sans le jeton continue de fonctionner, et le cookie meurt
+                # avec le navigateur.
+                self.send_header(
+                    "Set-Cookie",
+                    f"{NOM_COOKIE}={app.jeton}; Path=/; SameSite=Strict",
+                )
             # L'application est locale : rien ne doit etre mis en cache par le
             # navigateur, sans quoi un classement fraichement calcule
             # n'apparaitrait pas.
@@ -234,18 +244,37 @@ def construire_gestionnaire(app: Application):
             except (ValueError, UnicodeDecodeError):
                 return {}
 
+        def _jeton_fourni(self) -> str:
+            """Jeton presente par le client, quelle qu'en soit la forme.
+
+            L'en-tete est la voie normale de l'interface. L'URL sert au tout
+            premier acces (c'est ainsi que le navigateur est ouvert). Le
+            cookie prend le relais ensuite, pour qu'un simple rechargement de
+            l'adresse — sans le jeton — continue de fonctionner.
+            """
+            depuis_entete = self.headers.get("X-Jeton")
+            if depuis_entete:
+                return depuis_entete
+            depuis_url = parse_qs(urlparse(self.path).query).get("jeton", [""])[0]
+            if depuis_url:
+                return depuis_url
+            for morceau in (self.headers.get("Cookie") or "").split(";"):
+                nom, _, valeur = morceau.strip().partition("=")
+                if nom == NOM_COOKIE:
+                    return valeur
+            return ""
+
         def _jeton_valide(self) -> bool:
             """Le jeton empeche une page web tierce de piloter l'application.
 
             Un serveur sur 127.0.0.1 est joignable par tout programme de la
             machine, y compris un onglet ouvert sur un site quelconque : sans
             ce controle, ce site pourrait declencher des analyses ou lire la
-            watchlist.
+            watchlist. Le cookie est pose en SameSite=Strict et l'interface
+            envoie le jeton par en-tete : un site tiers ne peut faire ni l'un
+            ni l'autre.
             """
-            fourni = self.headers.get("X-Jeton") or parse_qs(
-                urlparse(self.path).query
-            ).get("jeton", [""])[0]
-            return secrets.compare_digest(fourni or "", app.jeton)
+            return secrets.compare_digest(self._jeton_fourni(), app.jeton)
 
         # ------------------------------------------------------------ routes
         def do_GET(self) -> None:  # noqa: N802
@@ -288,6 +317,12 @@ def construire_gestionnaire(app: Application):
             self._repondre(200, fichier.read_bytes(), "application/json; charset=utf-8")
 
         def _servir_statique(self, chemin: str) -> None:
+            # Le jeton presente dans l'URL est converti en cookie a l'ouverture
+            # de la page : l'interface reste utilisable apres un simple
+            # rechargement, sans que l'utilisateur ait quoi que ce soit a saisir.
+            depuis_url = parse_qs(urlparse(self.path).query).get("jeton", [""])[0]
+            poser = bool(depuis_url) and secrets.compare_digest(depuis_url, app.jeton)
+
             relatif = unquote(chemin.lstrip("/")) or "index.html"
             racine = dossier_site().resolve()
             fichier = (racine / relatif).resolve()
@@ -296,7 +331,7 @@ def construire_gestionnaire(app: Application):
             type_mime = mimetypes.guess_type(str(fichier))[0] or "application/octet-stream"
             if type_mime.startswith("text/") or type_mime == "application/javascript":
                 type_mime += "; charset=utf-8"
-            self._repondre(200, fichier.read_bytes(), type_mime)
+            self._repondre(200, fichier.read_bytes(), type_mime, poser_cookie=poser)
 
         # -------------------------------------------------------------- API
         def _api_get(self, chemin: str) -> None:
