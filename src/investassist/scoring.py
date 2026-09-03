@@ -7,6 +7,7 @@ EXCLU du classement plutot que classe sur une base partielle et trompeuse.
 """
 from __future__ import annotations
 
+import logging
 import statistics
 from datetime import datetime
 
@@ -15,6 +16,56 @@ import pandas as pd
 from . import criteria as crit
 from .config import ScoringConfig
 from .models import CriterionResult, Fundamentals, PillarResult, StockScore
+
+log = logging.getLogger(__name__)
+
+
+
+def _benefice_positif(fund: Fundamentals) -> bool:
+    """Le dernier exercice connu est-il benificiaire ?
+
+    Sert a distinguer « ce ratio n'existe pas pour cette societe » de « la
+    donnee manque ». Une societe en perte n'a pas de P/E : les trois criteres
+    qui en decoulent sont sans objet, exactement comme la dette nette sur
+    EBITDA pour une banque. Les compter comme des lacunes revenait a
+    neutraliser le pilier valorisation et a faire disparaitre du classement
+    les societes en forte croissance pas encore rentables.
+    """
+    for rec in reversed(fund.sorted_annual()):
+        net = rec.get("net_income")
+        if net is not None:
+            return net > 0
+    # Aucun resultat net connu : c'est une vraie lacune, pas une perte.
+    return True
+
+
+# Conditions prealables reconnues dans le champ « requires » de scoring.yaml.
+PRECONDITIONS = {
+    "benefice_positif": _benefice_positif,
+}
+
+
+def raisons_sans_objet(fund: Fundamentals, criterion) -> str:
+    """Explique pourquoi un critere ne s'applique pas a ce titre, ou "" sinon."""
+    if not criterion.applies_to(fund.snapshot.sector):
+        return f"sans objet pour le secteur « {fund.snapshot.sector} »"
+    for nom in criterion.requires:
+        predicat = PRECONDITIONS.get(nom)
+        if predicat is None:
+            log.warning(
+                "config/scoring.yaml : condition « %s » inconnue sur le critère %s.",
+                nom, criterion.key,
+            )
+            continue
+        if not predicat(fund):
+            if nom == "benefice_positif":
+                return (
+                    "sans objet : société en perte sur le dernier exercice, "
+                    "le P/E n'existe pas"
+                )
+            return f"sans objet : condition « {nom} » non remplie"
+    return ""
+
 
 def pays_no_dividend(fund: Fundamentals) -> bool:
     """Le titre ne verse-t-il PAS de dividende (par opposition a : on l'ignore) ?
@@ -89,6 +140,7 @@ def score_stock(
         name=snapshot.name,
         sector=snapshot.sector,
         region=fund.region,
+        country=snapshot.country,
         currency=snapshot.currency,
         price=snapshot.price,
         composite=None,
@@ -105,6 +157,27 @@ def score_stock(
 
         results: list[CriterionResult] = []
         for criterion in members:
+            # Un critere sans pertinence pour le secteur est ecarte AVANT tout
+            # calcul : ni note, ni compte comme lacune. « Dette nette /
+            # EBITDA » pour une banque n'est pas une donnee manquante, c'est
+            # une question qui ne se pose pas.
+            sans_objet = raisons_sans_objet(fund, criterion)
+            if sans_objet:
+                results.append(
+                    CriterionResult(
+                        key=criterion.key,
+                        label=criterion.label,
+                        unit=criterion.unit,
+                        value=None,
+                        score=None,
+                        weight=criterion.weight,
+                        pillar=pillar,
+                        detail="",
+                        reason_missing=sans_objet,
+                        not_applicable=True,
+                    )
+                )
+                continue
             value, detail, reason = values.get(criterion.key, (None, "", "critère non calculé"))
             results.append(
                 CriterionResult(
@@ -112,7 +185,7 @@ def score_stock(
                     label=criterion.label,
                     unit=criterion.unit,
                     value=value,
-                    score=criterion.score(value),
+                    score=criterion.score(value, snapshot.sector),
                     weight=criterion.weight,
                     pillar=pillar,
                     detail=detail,
@@ -120,8 +193,11 @@ def score_stock(
                 )
             )
 
-        total_weight = sum(r.weight for r in results) or 1.0
-        available_weight = sum(r.weight for r in results if r.available)
+        # La couverture se mesure sur les seuls criteres applicables : le poids
+        # d'un critere sans objet est redistribue sur les autres.
+        applicables = [r for r in results if not r.not_applicable]
+        total_weight = sum(r.weight for r in applicables) or 1.0
+        available_weight = sum(r.weight for r in applicables if r.available)
         coverage = available_weight / total_weight
 
         # Cas particulier du dividende : aucun versement n'est pas une lacune
@@ -144,6 +220,18 @@ def score_stock(
             score.warnings.append(
                 "Titre sans dividende : pilier dividende neutralisé "
                 f"(score {cfg.no_dividend_score:.0f}/100), sans pénalité."
+            )
+        elif not applicables:
+            # Aucun critere du pilier n'a de sens pour ce secteur. Le pilier
+            # est neutralise, mais il faut le dire autrement qu'une lacune :
+            # rien ne manque, la question ne se pose pas.
+            pillar_result = PillarResult(
+                key=pillar, weight=pillar_weight, score=None, coverage=1.0,
+                criteria=results, neutralized=True,
+            )
+            score.warnings.append(
+                f"Pilier {pillar} sans objet pour le secteur "
+                f"« {snapshot.sector} » : poids redistribué."
             )
         elif coverage < cfg.min_pillar_coverage:
             pillar_result = PillarResult(
@@ -216,6 +304,26 @@ def rank(scores: list[StockScore]) -> list[StockScore]:
 
 def excluded(scores: list[StockScore]) -> list[StockScore]:
     return [s for s in scores if not s.ranked]
+
+
+def assign_sector_ranks(ranked: list[StockScore]) -> None:
+    """Renseigne le rang de chaque titre au sein de son secteur.
+
+    Le classement general repose sur des seuils ABSOLUS, choisis pour rester
+    comparables d'une execution a l'autre. La contrepartie est structurelle :
+    un distributeur ou un service public ne peut pas atteindre la marge d'un
+    editeur de logiciels, et les premieres places reviennent donc toujours aux
+    memes secteurs. Le rang sectoriel repond a l'autre question — « le
+    meilleur de sa categorie » — sans toucher au score composite.
+    """
+    par_secteur: dict[str, list[StockScore]] = {}
+    for score in ranked:
+        par_secteur.setdefault(score.sector or "Non renseigné", []).append(score)
+    for membres in par_secteur.values():
+        membres.sort(key=lambda s: (-(s.composite or 0.0), s.ticker))
+        for position, score in enumerate(membres, start=1):
+            score.sector_rank = position
+            score.sector_count = len(membres)
 
 
 def to_dataframe(scores: list[StockScore]) -> pd.DataFrame:

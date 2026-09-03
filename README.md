@@ -228,7 +228,7 @@ son sous-score et le détail du calcul. C'est l'outil à utiliser en premier :
 une anomalie de parsing s'y voit sur 3 appels réseau, au lieu d'être noyée
 dans une exécution de 140 titres.
 
-## Sources de données — état vérifié le 23 août 2026
+## Sources de données — état vérifié le 2 septembre 2026
 
 Les plans gratuits évoluent souvent. Les limites ci-dessous ont été **testées
 par appel réel**, pas reprises d'une documentation.
@@ -237,9 +237,10 @@ par appel réel**, pas reprises d'une documentation.
 |---|---|---|---|
 | **SEC EDGAR** (`data.sec.gov`, API XBRL `companyfacts`) | aucune | HTTP 200, illimité | **≥ 6 exercices annuels** exploitables : CA, résultat net, résultat opérationnel, amortissements, capitaux propres, dette, trésorerie, actifs/passifs courants, BPA dilué, dividende déclaré. Sociétés déposant aux **États-Unis** uniquement. Limite officielle : 10 requêtes/s, User-Agent identifiant obligatoire. |
 | **Yahoo Finance** via `yfinance` | aucune | fonctionnel | Cours (5 ans), capitalisation, P/E, P/B, ROE, rendement, secteur, calendrier de publication, dividendes et divisions d'actions. Couvre l'Europe. **Mais seulement 4 à 5 exercices** dans les états financiers annuels. |
+| **Dépôts ESEF européens** (`filings.xbrl.org`) | aucune | HTTP 200, 25 892 dépôts / 27 pays | Rapports annuels officiels en XBRL des sociétés cotées dans l'Union, depuis l'exercice 2020. **Trois exercices par dépôt**, comparatifs inclus : chiffre d'affaires, résultat net, résultat brut, capitaux propres, total de l'actif, actifs/passifs courants, trésorerie, emprunts, flux d'exploitation, BPA. Seules les balises IFRS **normalisées** sont lues, jamais les extensions propres à l'émetteur. |
 | **Financial Modeling Prep** | requise (gratuite) | 250 req/jour | Actions **US uniquement** (le global est payant), 5 ans de cours, **5 trimestres** d'états financiers, 500 Mo/30 jours. Les points d'entrée `/api/v3/` sont en fin de vie au profit de `/stable/`. |
 
-### Pourquoi FMP n'est qu'une source d'appoint
+### Pourquoi FMP n'est qu'une source d'appoint — et à quoi il sert quand même
 
 Avec **5 trimestres** d'états financiers, le plan gratuit de FMP ne permet pas
 de calculer une croissance sur 5 ans. EDGAR fait mieux, gratuitement, sans clé
@@ -266,15 +267,52 @@ ci-dessus sont interrogées.
 
 ## L'écart de couverture Europe / États-Unis
 
-C'est une **limite réelle du marché de la donnée financière gratuite**, pas un
-choix d'implémentation :
+Historiquement le point faible du projet : Yahoo Finance ne remonte que
+**quatre exercices** pour les titres européens, contre cinq via EDGAR pour les
+américains. Conséquence mesurée sur un classement CAC 40 + Nasdaq-100 : les
+vingt premières places étaient **toutes** américaines, la meilleure valeur
+européenne arrivant 24ᵉ. Comparer un TCAM sur 4 ans à un TCAM sur 5 ans n'est
+pas homogène, et une partie de l'écart était donc mécanique.
 
-- une société américaine dépose ses comptes à la SEC → historique long,
-  structuré, officiel, gratuit ;
-- une société européenne non cotée aux États-Unis n'a **aucun équivalent
-  gratuit** → on se rabat sur Yahoo Finance, qui expose 4 à 5 exercices.
+**Il existe un équivalent européen d'EDGAR, gratuit.** Depuis l'exercice 2020,
+toute société cotée sur un marché réglementé de l'Union publie son rapport
+annuel au format électronique unique européen (ESEF), c'est-à-dire en XBRL
+selon la taxonomie IFRS. L'autorité XBRL en tient un index public :
+[filings.xbrl.org](https://filings.xbrl.org/).
 
-L'application applique une **fenêtre adaptative** et l'affiche :
+Vérifié le 2 septembre 2026 : 25 892 dépôts indexés sur 27 pays, dont 1 178
+français ; aucune clé d'API ; aucun quota annoncé. Et surtout, **un dépôt livre
+trois exercices d'un coup**, comparatifs inclus.
+
+L'application s'en sert pour allonger l'historique européen, avec deux règles
+de prudence :
+
+- Yahoo reste maître sur les exercices qu'il couvre déjà, ESEF ne fait que
+  **remonter plus loin dans le passé** ;
+- l'exercice commun aux deux sources sert de **contrôle de concordance**. Une
+  divergence de plus de 5 % sur le chiffre d'affaires révèle deux périmètres
+  de consolidation différents : l'apport ESEF est alors écarté, car mieux vaut
+  un historique court qu'un taux de croissance faux. Sur LVMH, les deux
+  sources concordent au million près (CA 2022 : 79,184 Md€ des deux côtés).
+
+Limites de cette source, assumées :
+
+- les sociétés étendent la taxonomie pour leurs sous-totaux propres. Le
+  résultat d'exploitation de LVMH est ainsi une balise maison. On ne lit donc
+  **que les balises IFRS normalisées**, jamais les extensions, dont le sens
+  varie d'un émetteur à l'autre — ce poste reste pris chez Yahoo ;
+- les banques tagguent leur compte de résultat autrement (produits d'intérêts
+  et non chiffre d'affaires) : l'apport ESEF est nul pour elles ;
+- un fichier de faits pèse environ 5 Mo car il contient le texte des annexes.
+  Comptez ce volume **une seule fois par société européenne** : un exercice
+  publié ne change plus jamais, le cache est donc permanent. Désactivable par
+  `esef.enabled: false` dans `config/settings.yaml`.
+
+La table `config/esef.yaml` fait le lien entre ticker et raison sociale du
+déposant — l'index ESEF n'indexe pas les tickers. Les 42 valeurs du CAC 40 y
+sont vérifiées une à une.
+
+L'application applique par ailleurs une **fenêtre adaptative** et l'affiche :
 
 - chaque titre porte un badge `fenêtre : N ans` ;
 - en dessous de `window.min_years` (3 par défaut), le titre est **exclu du
@@ -284,8 +322,8 @@ L'application applique une **fenêtre adaptative** et l'affiche :
   `data_quality.min_weight_coverage` (70 %) est également exclu, plutôt que
   classé sur un score partiel donc trompeur.
 
-Comparer un TCAM sur 4 ans à un TCAM sur 5 ans n'est pas strictement homogène.
-Le badge est là pour le rappeler à chaque lecture.
+Le badge reste là pour rappeler, à chaque lecture, sur combien d'exercices le
+score a réellement été calculé.
 
 ## Méthodologie de scoring
 
@@ -295,10 +333,55 @@ dur** : tout est dans `config/scoring.yaml`.
 | Pilier | Poids | Critères |
 |---|---|---|
 | Croissance | 35 % | CAGR du chiffre d'affaires (40 %), CAGR du résultat net (35 %), évolution de la marge nette (25 %) |
-| Valorisation | 25 % | PEG (40 %), P/E vs sa moyenne historique (35 %), P/B (15 %), P/E vs médiane du secteur (10 %) |
-| Rentabilité | 20 % | ROE moyen (55 %), marge nette moyenne (45 %) |
-| Qualité du bilan | 15 % | dette nette / EBITDA (60 %), ratio de liquidité générale (40 %) |
+| Valorisation | 25 % | PEG (25 %), rendement du free cash flow (25 %), P/E vs sa **médiane** historique (22 %), VE / chiffre d'affaires (13 %), P/B (10 %), P/E vs médiane du secteur (5 %) |
+| Rentabilité | 20 % | ROCE (30 %), ROE moyen (20 %), marge nette moyenne (20 %), conversion du bénéfice en trésorerie (18 %), marge brute moyenne (12 %) |
+| Qualité du bilan | 15 % | dette nette / EBITDA (30 %), fonds propres / total de l'actif (25 %), couverture des intérêts (20 %), ratio de liquidité générale (15 %), évolution du nombre d'actions (10 %) |
 | Dividende | 5 % | rendement courant (50 %), régularité et croissance (50 %) |
+
+**Le poids des cinq piliers n'a pas bougé** ; seule la composition interne a
+changé, pour couvrir la trésorerie, la rentabilité du capital et la dilution.
+Trois choix méritent d'être explicités :
+
+- **le ROE passe de 55 % à 20 % du pilier rentabilité**, au profit du ROCE.
+  Le ROE rapporte le bénéfice aux seuls fonds propres : une société qui
+  s'endette pour racheter ses actions l'améliore mécaniquement sans rien
+  améliorer de son exploitation. Le capital employé inclut la dette, donc la
+  performance ne peut plus être fabriquée par le levier. Le ROIC aurait été
+  préférable en théorie, mais il exige un taux d'impôt effectif qu'aucune
+  source gratuite ne publie de façon fiable : le poser par convention
+  reviendrait à inventer une donnée.
+- **la conversion du bénéfice en trésorerie** (free cash flow / résultat net)
+  est le seul contrôle de qualité des bénéfices possible : le résultat
+  comptable se pilote, les encaissements beaucoup moins.
+- **le P/E historique est comparé à la médiane, non à la moyenne.** Un exercice
+  à bénéfice quasi nul produit un P/E de plusieurs centaines qui tire la
+  moyenne vers le haut et fait passer le titre pour bon marché. Mesuré sur le
+  CAC 40 + Nasdaq-100 : neuf titres portaient une valeur aberrante supérieure
+  à cinq fois la médiane de leur propre série — CoStar affichait 3 362 sur un
+  exercice, pour une médiane de 107, et obtenait 100/100 de « décote ». Le
+  passage à la médiane déplace 49 titres sur 120 de cinq points ou plus sur ce
+  critère, presque toujours à la baisse : la moyenne biaisait le pilier
+  valorisation vers l'optimisme.
+
+### Pertinence sectorielle et conditions préalables
+
+Un critère peut être déclaré **sans objet** plutôt que manquant, ce qui
+redistribue son poids sans peser sur la couverture de données :
+
+```yaml
+net_debt_to_ebitda:
+  sectors_excluded: ["Financial Services"]   # la dette EST sa matière première
+  sector_points:
+    Real Estate: [[0.0, 100], [5.0, 70], [9.0, 28], [13.0, 0]]
+
+peg_ratio:
+  requires: ["benefice_positif"]             # sans bénéfice, pas de P/E
+```
+
+La distinction est la clé de voûte de la lecture : une lacune de données doit
+peser sur la couverture, une non-pertinence non. Sans elle, on pénalisait une
+banque pour ne pas être une entreprise industrielle, et on excluait du
+classement toute société de croissance pas encore rentable.
 
 Chaque critère est converti en sous-score 0–100 par une **fonction linéaire par
 morceaux** définie dans la configuration :
@@ -425,11 +508,20 @@ que vous avez défini vous-même, et ne constitue pas une incitation à agir.
   `requests` classique. Ce repli couvre les deux modes d'échec : exception TLS,
   et réponse vide sans exception (yfinance journalise alors `possibly delisted`
   à tort). Forçable via `yahoo.force_requests_session: true`.
-- **Banques et assurances** : la dette nette / EBITDA et le ratio de liquidité
-  générale n'ont pas de sens pour ces modèles d'activité. Le pilier « qualité
-  du bilan » est généralement neutralisé pour ces titres et son poids
-  redistribué — c'est signalé dans le détail, mais leurs scores restent moins
-  comparables à ceux des sociétés industrielles.
+- **Banques, assurances et foncières** : la dette nette / EBITDA, le ratio de
+  liquidité générale et la couverture des intérêts n'ont pas de sens pour une
+  banque — la dette EST sa matière première. Ces critères sont donc déclarés
+  **sans objet** pour le secteur (et non « manquants » : une non-pertinence ne
+  doit pas peser sur la couverture de données), leur poids est redistribué, et
+  le levier est mesuré par les fonds propres rapportés au total de l'actif, sur
+  un barème propre au secteur — 5 % de fonds propres est la norme
+  réglementaire d'une banque, pas une fragilité. Même principe pour
+  l'immobilier : sept fois l'EBITDA de dette nette est alarmant dans
+  l'industrie et banal pour une foncière, dont l'actif est un immeuble financé
+  par dette longue. Sans ce barème dédié, Unibail-Rodamco était noté 23/100
+  sur son bilan pour une structure de capital normale dans son métier.
+  Ces réglages sont dans `config/scoring.yaml` (`sectors_excluded`,
+  `sector_points`) — rien n'est codé en dur.
 - **Exercices décalés** : l'exercice est rattaché à l'année civile où tombe la
   majorité de la période (clôture de janvier à mai → année précédente). Les
   dividendes issus de Yahoo sont agrégés par année **civile** : pour une société
@@ -437,20 +529,33 @@ que vous avez défini vous-même, et ne constitue pas une incitation à agir.
   L'année civile en cours, incomplète par construction, est exclue du calcul de
   croissance du dividende — sans quoi tout titre paraîtrait baisser son
   dividende.
-- **Sociétés en perte** : lorsqu'une société affiche des pertes, le P/E est
-  négatif et le PEG n'est pas interprétable — trois des quatre critères de
-  valorisation deviennent alors indisponibles, et la couverture tombe souvent
-  sous le seuil de 70 %. Ces titres sont donc **exclus du classement** plutôt
-  que notés sur des critères manquants. C'est rigoureux, mais cela écarte de
-  fait certaines valeurs de croissance non encore rentables. Pour les inclure,
-  deux réglages possibles dans `config/scoring.yaml` : abaisser
-  `data_quality.min_weight_coverage`, ou réduire le poids du critère `peg_ratio`
-  au profit de `price_to_book` (qui reste calculable en cas de perte).
+- **Sociétés en perte** : une société sans bénéfice n'a pas de P/E, donc ni
+  PEG, ni P/E historique, ni P/E sectoriel. Ces trois critères comptaient
+  auparavant comme autant de **lacunes**, ce qui suffisait à neutraliser le
+  pilier valorisation et à exclure du classement toute valeur de croissance
+  pas encore rentable — CrowdStrike, Zscaler, MongoDB, Atlassian et Intel
+  disparaissaient ainsi de l'analyse. Ils sont désormais déclarés **sans
+  objet** (condition `requires: ["benefice_positif"]` dans
+  `config/scoring.yaml`), et le pilier reste calculé sur le rendement du free
+  cash flow et la valeur d'entreprise rapportée au chiffre d'affaires, deux
+  critères qui gardent un sens sans bénéfice comptable. Le levier bascule de
+  la même façon sur le free cash flow quand l'EBITDA est négatif : c'est le
+  cas exact des éditeurs de logiciels, dont la rémunération en actions creuse
+  le résultat comptable alors que la trésorerie rentre.
+- **Fonds propres négatifs** : des rachats d'actions supérieurs aux bénéfices
+  accumulés rendent les fonds propres comptables négatifs (Starbucks,
+  McDonald's, Philip Morris). Le ROE et le P/B perdent alors tout sens. Le
+  message d'origine annonçait « fonds propres absents », ce qui était faux et
+  laissait croire à un défaut de la source : il nomme maintenant la vraie
+  cause, et la rentabilité est mesurée par le **ROCE**, calculable sur un
+  capital employé même quand les fonds propres sont négatifs.
 - Les données ne sont **pas auditées**. Une erreur de source se propage au
   score. Le détail par critère est là pour vous permettre de la repérer.
-- **Durée d'exécution** : mesurée à **490 secondes pour 144 titres** (CAC 40 +
-  Nasdaq-100) sans cache, soit environ 3,4 secondes par titre avec 4 requêtes
-  en parallèle. Un cache disque de
+- **Durée d'exécution** : mesurée à **478 secondes pour 143 titres** (CAC 40 +
+  Nasdaq-100) sans cache, soit environ 3,3 secondes par titre avec 4 requêtes
+  en parallèle ; **42 secondes** avec le cache chaud. Le premier passage
+  télécharge en plus les dépôts ESEF des valeurs européennes (environ 5 Mo par
+  société, une seule fois). Un cache disque de
   12 h (configurable) évite de reconsommer les quotas à chaque rafraîchissement
   d'écran. Sous forte parallélisation, Yahoo renvoie parfois un contenu tronqué
   avec un code HTTP 200 : ces réponses sont détectées, réessayées et **jamais**

@@ -39,6 +39,10 @@ def _criterion_payload(criterion) -> dict[str, Any]:
         "weight": criterion.weight,
         "detail": criterion.detail,
         "reason_missing": criterion.reason_missing,
+        # Distingue « ce critere n'a pas de sens ici » de « la donnee manque » :
+        # l'interface ne doit pas presenter une banque comme mal renseignee
+        # parce qu'elle n'a pas de ratio de liquidite generale.
+        "not_applicable": criterion.not_applicable,
     }
 
 
@@ -48,6 +52,9 @@ def score_payload(score: StockScore, rank: int | None = None) -> dict[str, Any]:
         "name": score.name,
         "sector": score.sector,
         "region": score.region,
+        "country": score.country,
+        "sector_rank": score.sector_rank,
+        "sector_count": score.sector_count,
         "currency": score.currency,
         "price": score.price,
         "composite": None if score.composite is None else round(score.composite, 1),

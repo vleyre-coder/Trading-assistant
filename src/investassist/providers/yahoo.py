@@ -31,17 +31,45 @@ INCOME_MAP: dict[str, tuple[str, ...]] = {
                    "Net Income From Continuing Operation Net Minority Interest"),
     "operating_income": ("Operating Income", "Total Operating Income As Reported", "EBIT"),
     "ebitda": ("EBITDA", "Normalized EBITDA"),
+    "gross_profit": ("Gross Profit",),
     "eps_diluted": ("Diluted EPS", "Basic EPS"),
+    "interest_expense": ("Interest Expense", "Interest Expense Non Operating"),
+    "shares_diluted": ("Diluted Average Shares", "Basic Average Shares"),
 }
 
 BALANCE_MAP: dict[str, tuple[str, ...]] = {
     "equity": ("Stockholders Equity", "Common Stock Equity",
                "Total Equity Gross Minority Interest"),
+    "total_assets": ("Total Assets",),
     "total_debt": ("Total Debt", "Long Term Debt And Capital Lease Obligation"),
     "cash": ("Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents"),
     "current_assets": ("Current Assets",),
     "current_liabilities": ("Current Liabilities",),
 }
+
+# Tableau de flux. Libelles verifies le 2 septembre 2026 sur MC.PA (Europe),
+# AAPL (Etats-Unis) et BNP.PA (banque) : les quatre postes sont presents dans
+# les trois cas, y compris pour les titres europeens ou EDGAR ne repond pas.
+CASHFLOW_MAP: dict[str, tuple[str, ...]] = {
+    "operating_cash_flow": ("Operating Cash Flow",
+                            "Cash Flow From Continuing Operating Activities"),
+    "free_cash_flow": ("Free Cash Flow",),
+    "capex": ("Capital Expenditure", "Purchase Of PPE", "Net PPE Purchase And Sale"),
+    "depreciation_amortisation": ("Depreciation And Amortization",
+                                  "Depreciation Amortization Depletion",
+                                  "Reconciled Depreciation"),
+}
+
+# Postes dont Yahoo publie le signe comptable (une sortie de tresorerie est
+# negative, une charge d'interets parfois negative). On les normalise en
+# valeur positive : les criteres raisonnent en intensite, pas en signe.
+ABSOLUTE_FIELDS = ("capex", "interest_expense")
+
+# Version du format des enregistrements mis en cache. A incrementer des qu'un
+# champ est ajoute : sans cela, une entree ecrite par une version anterieure
+# serait relue telle quelle et les nouveaux postes resteraient vides sans
+# qu'aucune erreur ne le signale.
+SCHEMA_ANNUEL = 2
 
 
 class YahooClient:
@@ -250,7 +278,7 @@ class YahooClient:
         return None
 
     def annual_records(self, ticker: str, *, use_cache: bool = True) -> tuple[list[AnnualRecord], list[str]]:
-        cache_key = f"{ticker}:annual"
+        cache_key = f"{ticker}:annual:v{SCHEMA_ANNUEL}"
         if use_cache:
             cached = self.cache.get("yahoo_annual", cache_key)
             if cached is not None:
@@ -271,10 +299,16 @@ class YahooClient:
         warnings: list[str] = []
         income = self._fetch(ticker, "income_stmt")
         balance = self._fetch(ticker, "balance_sheet")
+        cashflow = self._fetch(ticker, "cashflow")
         if income is None or not hasattr(income, "columns") or income.empty:
             return [], [f"Yahoo : états financiers annuels indisponibles pour {ticker}."]
 
         dividends_by_year = self.dividends_by_year(ticker, use_cache=use_cache)
+
+        def _from(frame, labels, column):
+            if frame is None or not hasattr(frame, "columns") or column not in frame.columns:
+                return None
+            return self._pick(frame, labels, column)
 
         records: list[AnnualRecord] = []
         for column in income.columns:
@@ -284,11 +318,30 @@ class YahooClient:
             for field, labels in INCOME_MAP.items():
                 values[field] = self._pick(income, labels, column)
             for field, labels in BALANCE_MAP.items():
-                values[field] = (
-                    self._pick(balance, labels, column)
-                    if balance is not None and hasattr(balance, "columns") and column in balance.columns
-                    else None
-                )
+                values[field] = _from(balance, labels, column)
+            for field, labels in CASHFLOW_MAP.items():
+                values[field] = _from(cashflow, labels, column)
+
+            for field in ABSOLUTE_FIELDS:
+                if values.get(field) is not None:
+                    values[field] = abs(values[field])
+
+            # EBITDA europeen : Yahoo ne publie « EBITDA » que pour une partie
+            # des titres. Quand il manque, il se reconstitue exactement a
+            # partir du resultat d'exploitation et des amortissements — ce qui
+            # rend le critere dette nette / EBITDA calculable en Europe.
+            if values.get("ebitda") is None:
+                op, da = values.get("operating_income"), values.get("depreciation_amortisation")
+                if op is not None and da is not None:
+                    values["ebitda"] = op + da
+
+            # Free cash flow : le poste publie fait foi ; a defaut il se
+            # deduit, la definition etant tresorerie d'exploitation - capex.
+            if values.get("free_cash_flow") is None:
+                ocf, capex = values.get("operating_cash_flow"), values.get("capex")
+                if ocf is not None and capex is not None:
+                    values["free_cash_flow"] = ocf - capex
+
             values["dividend_per_share"] = dividends_by_year.get(fiscal_year)
             records.append(
                 AnnualRecord(fiscal_year=fiscal_year, period_end=period_end, values=values)

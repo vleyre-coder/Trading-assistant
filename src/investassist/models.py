@@ -12,13 +12,24 @@ ANNUAL_FIELDS = (
     "net_income",
     "operating_income",
     "ebitda",
+    "gross_profit",
     "equity",
+    "total_assets",
     "total_debt",
     "cash",
     "current_assets",
     "current_liabilities",
     "eps_diluted",
     "dividend_per_share",
+    # Tresorerie. Le resultat comptable se pilote (provisions, etalements,
+    # depreciations) ; les encaissements beaucoup moins. Sans ces postes,
+    # aucun controle de la qualite des benefices n'est possible.
+    "operating_cash_flow",
+    "capex",             # toujours stocke en valeur POSITIVE (sortie de tresorerie)
+    "free_cash_flow",    # publie si disponible, sinon exploitation - capex
+    "depreciation_amortisation",
+    "interest_expense",  # toujours stocke en valeur POSITIVE (charge)
+    "shares_diluted",    # nombre moyen d'actions diluees : mesure la dilution
 )
 
 
@@ -115,6 +126,12 @@ class CriterionResult:
     pillar: str
     detail: str = ""          # explication lisible (ex. "2020: 143,0 Md -> 2025: 281,7 Md")
     reason_missing: str = ""  # pourquoi le critere est N/A
+    # Critere sans signification pour le secteur du titre (« dette nette /
+    # EBITDA » pour une banque, par exemple). A distinguer absolument d'une
+    # donnee manquante : une lacune doit peser sur la couverture, une
+    # non-pertinence non — sinon on penalise une banque pour ne pas etre une
+    # entreprise industrielle.
+    not_applicable: bool = False
 
     @property
     def available(self) -> bool:
@@ -142,6 +159,24 @@ class StockScore:
     currency: str | None
     price: float | None
     composite: float | None
+    # « region » designe la place de COTATION, qui sert a choisir la source de
+    # donnees (EDGAR pour les Etats-Unis, Yahoo ailleurs). Elle ne dit rien de
+    # l'emetteur lui-meme : ARM et AstraZeneca sont britanniques, ASML
+    # neerlandais, tous etiquetes « US » parce qu'ils cotent au Nasdaq.
+    #
+    # « country » est le SIEGE SOCIAL declare par la source, ce qui est plus
+    # informatif que la place de cotation mais ne designe pas le pays
+    # d'activite : PDD Holdings est domicilie en Irlande et MercadoLibre en
+    # Uruguay, alors que leurs marches sont ailleurs. A lire comme une
+    # information de rattachement juridique, jamais comme une mesure
+    # d'exposition geographique.
+    country: str | None = None
+    # Rang au sein du secteur dans l'univers analyse. Le classement general
+    # compare des seuils absolus : un distributeur ne peut structurellement
+    # pas atteindre la marge d'un editeur de logiciels. Le rang sectoriel
+    # repond a l'autre question, « le meilleur de sa categorie ».
+    sector_rank: int | None = None
+    sector_count: int | None = None
     pillars: dict[str, PillarResult] = field(default_factory=dict)
     window_years: int = 0
     coverage: float = 0.0
@@ -168,6 +203,9 @@ class StockScore:
             "nom": self.name,
             "secteur": self.sector,
             "region": self.region,
+            "pays": self.country,
+            "rang_secteur": self.sector_rank,
+            "titres_du_secteur": self.sector_count,
             "score": None if self.composite is None else round(self.composite, 1),
             "fenetre_ans": self.window_years,
             "couverture": round(self.coverage * 100, 0),

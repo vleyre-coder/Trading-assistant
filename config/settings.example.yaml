@@ -50,3 +50,12 @@ alerts:
     sender: "investassist@exemple.fr"
     recipients:
       - "votre.email@exemple.fr"
+
+# --- Depots europeens ESEF (filings.xbrl.org) -------------------------
+# Source officielle, gratuite, sans cle : les rapports annuels au format
+# electronique unique europeen. Sert a allonger l'historique des titres
+# europeens, que Yahoo Finance limite a quatre exercices.
+# Premier lancement : environ 5 Mo telecharges par societe europeenne, une
+# seule fois (un exercice publie ne change plus, le cache est permanent).
+esef:
+  enabled: true

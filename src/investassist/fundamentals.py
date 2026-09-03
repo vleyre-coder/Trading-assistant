@@ -15,6 +15,7 @@ from .config import Settings
 from .models import ANNUAL_FIELDS, AnnualRecord, Fundamentals, Snapshot
 from .providers.base import DiskCache
 from .providers.edgar import EdgarClient
+from .providers.esef import EsefClient
 from .providers.yahoo import YahooClient
 
 log = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ class FundamentalsService:
         self.cache = cache or DiskCache(settings.cache_dir, settings.cache_ttl_hours)
         self.yahoo = YahooClient(settings, self.cache)
         self.edgar = EdgarClient(settings, self.cache)
+        self.esef = EsefClient(settings, self.cache)
 
     def load(self, ticker: str, *, target_years: int = 5, use_cache: bool = True) -> Fundamentals:
         warnings: list[str] = []
@@ -170,6 +172,12 @@ class FundamentalsService:
                         rec.values["dividend_per_share"] = yahoo_dividends[fy]
                 sources["dividend_per_share"] = "yahoo (ajuste des splits)"
 
+        # --- Allongement de l'historique europeen par les depots ESEF ----
+        if region == "EU" and self.settings.esef_enabled and by_year:
+            avertissement = self._completer_par_esef(ticker, by_year, target_years, sources)
+            if avertissement:
+                warnings.append(avertissement)
+
         # Fenetre : les N derniers exercices disponibles.
         records = sorted(by_year.values(), key=lambda r: r.fiscal_year)
         usable = [r for r in records if r.get("revenue") is not None]
@@ -188,6 +196,87 @@ class FundamentalsService:
             sources=sources,
             warnings=warnings,
             region=region,
+        )
+
+    # Ecart tolere entre deux sources sur un meme exercice. Au-dela, les deux
+    # series ne decrivent pas le meme perimetre de consolidation et les
+    # melanger fabriquerait un taux de croissance faux.
+    ECART_MAX_CONCORDANCE = 0.05
+
+    def _completer_par_esef(
+        self,
+        ticker: str,
+        by_year: dict[int, AnnualRecord],
+        target_years: int,
+        sources: dict[str, str],
+    ) -> str:
+        """Ajoute les exercices anterieurs lus dans le depot ESEF officiel.
+
+        Yahoo ne remonte que quatre exercices pour l'Europe. Le depot ESEF en
+        contient trois d'un coup, comparatifs inclus : de quoi atteindre la
+        fenetre visee avec des chiffres officiels.
+
+        Regle de prudence : Yahoo reste maitre sur les exercices qu'il couvre
+        deja, et l'exercice commun aux deux sources sert de controle. Une
+        divergence de plus de 5 % sur le chiffre d'affaires signale deux
+        perimetres de consolidation differents ; on renonce alors a completer
+        plutot que de fabriquer une serie incoherente.
+        """
+        connus = sorted(y for y, r in by_year.items() if r.get("revenue") is not None)
+        if not connus or len(connus) >= target_years:
+            return ""
+
+        try:
+            recs, _ = self.esef.annual_records(ticker, avant_exercice=connus[0])
+        except Exception as exc:  # noqa: BLE001
+            log.debug("ESEF indisponible pour %s : %s", ticker, exc)
+            return ""
+        if not recs:
+            return ""
+
+        # Controle de concordance sur les exercices communs.
+        for rec in recs:
+            reference = by_year.get(rec.fiscal_year)
+            if reference is None:
+                continue
+            a, b = reference.get("revenue"), rec.get("revenue")
+            if a and b and abs(a - b) / max(abs(a), abs(b)) > self.ECART_MAX_CONCORDANCE:
+                log.warning(
+                    "ESEF ecarte pour %s : chiffre d'affaires %s divergent "
+                    "(Yahoo %.4g / ESEF %.4g).", ticker, rec.fiscal_year, a, b,
+                )
+                return (
+                    f"Historique ESEF écarté : le chiffre d'affaires {rec.fiscal_year} "
+                    "diverge de plus de 5 % entre les deux sources (périmètres de "
+                    "consolidation différents)."
+                )
+
+        # Un exercice est compte comme gagne s'il devient exploitable, c'est-a-
+        # dire s'il porte un chiffre d'affaires qu'il n'avait pas. Yahoo
+        # renvoie en effet des colonnes entierement vides pour les exercices
+        # les plus anciens : l'exercice existe deja dans le dictionnaire mais
+        # ne sert a rien tant qu'il n'est pas rempli.
+        gagnes: list[int] = []
+        for rec in recs:
+            cible = by_year.get(rec.fiscal_year)
+            if cible is None:
+                by_year[rec.fiscal_year] = rec
+                if rec.get("revenue") is not None:
+                    gagnes.append(rec.fiscal_year)
+                continue
+            exploitable_avant = cible.get("revenue") is not None
+            for champ, valeur in rec.values.items():
+                if valeur is not None and cible.get(champ) is None:
+                    cible.values[champ] = valeur
+            if not exploitable_avant and cible.get("revenue") is not None:
+                gagnes.append(rec.fiscal_year)
+
+        if not gagnes:
+            return ""
+        sources["historique_ancien"] = "esef (dépôt officiel)"
+        return (
+            f"Historique complété par le dépôt ESEF officiel : exercice(s) "
+            f"{', '.join(str(a) for a in sorted(gagnes))}."
         )
 
     def price_history(self, ticker: str, *, period: str = "5y", use_cache: bool = True):

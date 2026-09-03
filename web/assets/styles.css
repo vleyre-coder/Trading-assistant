@@ -401,6 +401,16 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
 .critere .explication { color: var(--ink-secondary); font-size: 0.81rem; margin-top: 4px; }
 .critere .indisponible { color: var(--ink-muted); font-style: italic; }
 
+/* Critère sans objet pour le secteur ou pour la situation du titre : il est
+   retiré du calcul, pas manquant. Il reste visible — masquer une règle
+   d'exclusion reviendrait à rendre le classement opaque — mais en retrait,
+   pour qu'aucun lecteur ne le confonde avec une donnée absente. */
+.critere.sans-objet .titre,
+.critere.sans-objet .chiffre { color: var(--ink-muted); font-weight: 500; }
+.critere.sans-objet .etiquette {
+  background: transparent; border: 1px dashed var(--border-fort); color: var(--ink-muted);
+}
+
 /* ============================================================ graphe */
 .graphe { position: relative; margin-top: 4px; }
 .graphe svg { display: block; width: 100%; height: auto; }

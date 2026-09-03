@@ -75,15 +75,63 @@ criteria:
   # ================= RENTABILITE =================
   roe_avg:
     pillar: profitability
-    weight: 0.55
+    weight: 0.20
+    # Poids ramene de 0,55 a 0,20 : le ROE rapporte le benefice aux seuls
+    # fonds propres, donc une societe qui s'endette pour racheter ses actions
+    # l'ameliore sans rien ameliorer de son exploitation. Le ROCE ci-dessous
+    # reprend le premier role, levier neutralise.
+    sectors_excluded: []
     label: "ROE moyen"
     unit: percent
     higher_is_better: true
     points: [[0.0, 0], [0.05, 25], [0.10, 45], [0.15, 65], [0.25, 88], [0.40, 100]]
 
+  roce_avg:
+    pillar: profitability
+    weight: 0.30
+    label: "Rentabilité du capital employé (ROCE)"
+    unit: percent
+    higher_is_better: true
+    # Resultat d'exploitation / (total actif - passifs courants). Insensible
+    # au levier, et calculable meme quand les fonds propres sont negatifs
+    # (Starbucks, McDonald's : rachats d'actions superieurs aux benefices
+    # accumules), cas ou le ROE ne veut plus rien dire.
+    # Sans objet pour une banque : la notion de capital employe ne s'applique
+    # pas a un bilan bancaire.
+    sectors_excluded: ["Financial Services"]
+    points: [[0.0, 0], [0.05, 25], [0.10, 45], [0.15, 65], [0.25, 88], [0.40, 100]]
+
+  gross_margin_avg:
+    pillar: profitability
+    weight: 0.12
+    label: "Marge brute moyenne"
+    unit: percent
+    higher_is_better: true
+    # Meilleur indicateur simple du pouvoir de fixation des prix : une offre
+    # difficile a remplacer se paie. Peu sensible a la structure financiere,
+    # contrairement a la marge nette.
+    sectors_excluded: ["Financial Services", "Real Estate"]
+    points: [[0.10, 0], [0.20, 25], [0.30, 45], [0.45, 70], [0.60, 88], [0.75, 100]]
+
+  cash_conversion:
+    pillar: profitability
+    weight: 0.18
+    label: "Conversion du bénéfice en trésorerie (FCF / résultat net)"
+    unit: ratio
+    higher_is_better: true
+    # Controle de qualite des benefices : le resultat comptable se pilote,
+    # les encaissements beaucoup moins. Un ratio durablement sous 0,6 signale
+    # un benefice qui ne devient pas de l'argent disponible.
+    # Sans objet pour les banques et les foncieres : leur tableau de flux
+    # d'exploitation integre les mouvements de credit et les acquisitions
+    # d'immeubles, ce qui rend le FCF non interpretable (BNP Paribas affiche
+    # ainsi -97 Md puis +47 Md d'un exercice a l'autre).
+    sectors_excluded: ["Financial Services", "Real Estate"]
+    points: [[0.0, 0], [0.40, 25], [0.70, 55], [1.0, 80], [1.30, 95], [2.0, 100]]
+
   net_margin_avg:
     pillar: profitability
-    weight: 0.45
+    weight: 0.20
     label: "Marge nette moyenne"
     unit: percent
     higher_is_better: true
@@ -92,22 +140,78 @@ criteria:
   # ================= QUALITE DU BILAN =================
   net_debt_to_ebitda:
     pillar: balance_sheet
-    weight: 0.60
+    weight: 0.30
     label: "Dette nette / EBITDA"
     unit: ratio
     higher_is_better: false
-    # Tresorerie nette (valeur negative) = meilleur score
+    # Tresorerie nette (valeur negative) = meilleur score.
+    # Repli sur le free cash flow quand l'EBITDA est negatif (editeurs de
+    # logiciels : la remuneration en actions creuse le resultat comptable
+    # alors que la tresorerie rentre).
+    # Sans objet pour une banque, qui n'a ni EBITDA ni dette nette au sens
+    # industriel : la dette EST sa matiere premiere.
+    sectors_excluded: ["Financial Services"]
     points: [[-1.0, 100], [0.0, 90], [1.0, 75], [2.0, 55], [3.0, 35], [4.0, 15], [6.0, 0]]
+    # Un levier de 7 fois l'EBITDA est alarmant dans l'industrie et banal pour
+    # une foncière, dont l'actif est un immeuble finance par dette longue.
+    # Sans ce bareme dedie, Unibail-Rodamco etait note 23/100 sur son bilan
+    # pour une structure de capital normale dans son secteur.
+    sector_points:
+      Real Estate: [[0.0, 100], [3.0, 88], [5.0, 70], [7.0, 50], [9.0, 28], [13.0, 0]]
 
   current_ratio:
     pillar: balance_sheet
-    weight: 0.40
+    weight: 0.15
+    # Sans objet pour une banque : son bilan ne distingue pas actif courant et
+    # non courant de la meme facon, et la transformation d'echeances est son
+    # metier, pas une anomalie de liquidite.
+    sectors_excluded: ["Financial Services"]
     label: "Ratio de liquidité générale"
     unit: ratio
     higher_is_better: true
     # Au-dela de 3, un ratio tres eleve n'est plus un signal de qualite
     # (tresorerie oisive) : le score plafonne puis reflue legerement.
     points: [[0.5, 0], [1.0, 40], [1.5, 75], [2.0, 100], [3.0, 100], [5.0, 85]]
+
+  interest_coverage:
+    pillar: balance_sheet
+    weight: 0.20
+    label: "Couverture des intérêts"
+    unit: ratio
+    higher_is_better: true
+    # Marge de securite face au service de la dette. Une societe sans dette
+    # financiere ni charge d'interets recoit le haut du bareme.
+    # Sans objet pour une banque : les interets verses sont son cout de
+    # matiere premiere, pas une charge de structure.
+    sectors_excluded: ["Financial Services"]
+    points: [[0.0, 0], [2.0, 30], [4.0, 55], [8.0, 80], [15.0, 95], [30.0, 100]]
+
+  equity_to_assets:
+    pillar: balance_sheet
+    weight: 0.25
+    label: "Fonds propres / total de l'actif"
+    unit: percent
+    higher_is_better: true
+    # Seule mesure de levier qui garde un sens pour une banque ou un assureur.
+    # Le bareme general vise des entreprises non financieres.
+    points: [[0.0, 0], [0.10, 30], [0.25, 60], [0.40, 85], [0.60, 100]]
+    # Un bilan bancaire est structurellement leve : 5 % de fonds propres est
+    # la norme reglementaire, pas une fragilite. Note sur l'echelle generale,
+    # toute banque aurait recu zero.
+    sector_points:
+      Financial Services: [[0.02, 0], [0.04, 40], [0.06, 65], [0.08, 85], [0.12, 100]]
+      Real Estate: [[0.10, 0], [0.20, 35], [0.35, 65], [0.50, 90], [0.65, 100]]
+
+  share_count_trend:
+    pillar: balance_sheet
+    weight: 0.10
+    label: "Évolution du nombre d'actions (réduction annuelle)"
+    unit: percent
+    higher_is_better: true
+    # Une croissance financee par emission d'actions n'enrichit pas
+    # l'actionnaire en place ; une base d'actions qui se reduit ajoute a la
+    # performance par action. Aucun autre critere ne mesure cette dimension.
+    points: [[-0.08, 0], [-0.02, 35], [0.0, 60], [0.02, 85], [0.05, 100]]
 
   # ================= DIVIDENDES =================
   # Pilier a poids faible (5%). Un titre sans dividende obtient un score
@@ -136,7 +240,12 @@ criteria:
   # ================= VALORISATION RELATIVE A LA CROISSANCE =================
   peg_ratio:
     pillar: valuation
-    weight: 0.40
+    # Repose sur le P/E : sans objet pour une societe en perte, ou le ratio
+    # n'existe pas. Sans cette condition, les trois criteres de P/E comptaient
+    # comme autant de lacunes et suffisaient a neutraliser le pilier, donc a
+    # exclure du classement toute societe pas encore rentable.
+    requires: ["benefice_positif"]
+    weight: 0.25
     label: "PEG (P/E rapporté à la croissance)"
     unit: ratio
     higher_is_better: false
@@ -146,17 +255,54 @@ criteria:
 
   pe_vs_own_history:
     pillar: valuation
-    weight: 0.35
-    label: "P/E actuel vs sa moyenne historique"
+    # Repose sur le P/E : sans objet pour une societe en perte, ou le ratio
+    # n'existe pas. Sans cette condition, les trois criteres de P/E comptaient
+    # comme autant de lacunes et suffisaient a neutraliser le pilier, donc a
+    # exclure du classement toute societe pas encore rentable.
+    requires: ["benefice_positif"]
+    weight: 0.22
+    label: "P/E actuel vs sa médiane historique"
     unit: ratio
     higher_is_better: false
-    # Ratio = P/E actuel / P/E moyen du titre sur la fenetre.
+    # Ratio = P/E actuel / P/E MEDIAN du titre sur la fenetre. La mediane
+    # resiste aux exercices a benefice quasi nul, qui produisent un P/E de
+    # plusieurs centaines et feraient passer le titre pour bon marche.
     # < 1 : le titre se paie moins cher que sa propre norme.
     points: [[0.5, 100], [0.75, 88], [1.0, 65], [1.25, 45], [1.5, 28], [2.0, 5]]
 
+  fcf_yield:
+    pillar: valuation
+    weight: 0.25
+    label: "Rendement du free cash flow"
+    unit: percent
+    higher_is_better: true
+    # Critere de valorisation qui reste calculable la ou le P/E ne l'est pas.
+    # Un FCF negatif est une information (score au plancher), pas une donnee
+    # manquante.
+    sectors_excluded: ["Financial Services", "Real Estate"]
+    points: [[-0.05, 0], [0.0, 12], [0.02, 38], [0.04, 62], [0.06, 80], [0.09, 94], [0.14, 100]]
+
+  ev_to_sales:
+    pillar: valuation
+    weight: 0.13
+    label: "Valeur d'entreprise / chiffre d'affaires"
+    unit: ratio
+    higher_is_better: false
+    # Repli pour les societes sans benefice : P/E, PEG et P/E historique sont
+    # alors indisponibles tous les trois, ce qui suffisait a neutraliser le
+    # pilier et a faire disparaitre du classement des societes en forte
+    # croissance pas encore rentables (CrowdStrike, Zscaler, MongoDB).
+    sectors_excluded: ["Financial Services"]
+    points: [[0.5, 100], [1.0, 90], [2.0, 75], [4.0, 55], [8.0, 30], [15.0, 0]]
+
   pe_vs_sector:
     pillar: valuation
-    weight: 0.10
+    # Repose sur le P/E : sans objet pour une societe en perte, ou le ratio
+    # n'existe pas. Sans cette condition, les trois criteres de P/E comptaient
+    # comme autant de lacunes et suffisaient a neutraliser le pilier, donc a
+    # exclure du classement toute societe pas encore rentable.
+    requires: ["benefice_positif"]
+    weight: 0.05
     label: "P/E actuel vs médiane du secteur"
     unit: ratio
     higher_is_better: false
@@ -165,7 +311,7 @@ criteria:
 
   price_to_book:
     pillar: valuation
-    weight: 0.15
+    weight: 0.10
     label: "P/B (price-to-book)"
     unit: ratio
     higher_is_better: false

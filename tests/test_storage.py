@@ -134,3 +134,52 @@ def test_etat_des_regles_memorise(db):
     assert db.alert_rules()[0]["last_state"] is None
     db.set_rule_state(rule_id, "crossed")
     assert db.alert_rules()[0]["last_state"] == "crossed"
+
+
+def test_migration_ajoute_les_colonnes_sur_une_base_ancienne(tmp_path):
+    """Une base creee par une version anterieure doit continuer a fonctionner :
+    l'enregistrement echouerait sinon sur les colonnes ajoutees depuis."""
+    import sqlite3
+
+    chemin = tmp_path / "ancienne.sqlite"
+    neuve = Database(chemin)
+    with neuve.connect() as conn:
+        colonnes = [r["name"] for r in conn.execute("PRAGMA table_info(scores)")]
+    for colonne in ("country", "sector_rank", "sector_count"):
+        assert colonne in colonnes
+
+    # Simuler l'etat anterieur en retirant les colonnes, puis rouvrir.
+    with sqlite3.connect(chemin) as conn:
+        conn.execute("ALTER TABLE scores DROP COLUMN country")
+        conn.execute("ALTER TABLE scores DROP COLUMN sector_rank")
+        conn.execute("ALTER TABLE scores DROP COLUMN sector_count")
+    rouverte = Database(chemin)
+    with rouverte.connect() as conn:
+        colonnes = [r["name"] for r in conn.execute("PRAGMA table_info(scores)")]
+    for colonne in ("country", "sector_rank", "sector_count"):
+        assert colonne in colonnes
+
+
+def test_aller_retour_pays_rang_sectoriel_et_non_pertinence(tmp_path):
+    """Ce qui est affiche doit survivre a un redemarrage : le pays de
+    l'emetteur, le rang sectoriel, et la distinction « sans objet » /
+    « donnee manquante »."""
+    from investassist import scoring
+    from investassist.config import load_scoring
+    from investassist.storage import score_from_row
+    from test_scoring import make_fundamentals
+
+    fund = make_fundamentals()
+    fund.snapshot.country = "China"
+    score = scoring.score_stock(fund, load_scoring())
+    score.sector_rank, score.sector_count = 3, 12
+    score.pillars["balance_sheet"].criteria[0].not_applicable = True
+
+    db = Database(tmp_path / "essai.sqlite")
+    run_id = db.start_run(["essai"])
+    db.save_scores(run_id, [score], {score.ticker: 1})
+
+    relu = score_from_row(dict(db.scores_for_run(run_id)[0]))
+    assert relu.country == "China"
+    assert (relu.sector_rank, relu.sector_count) == (3, 12)
+    assert relu.pillars["balance_sheet"].criteria[0].not_applicable is True

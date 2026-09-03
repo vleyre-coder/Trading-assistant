@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS scores (
     name              TEXT,
     sector            TEXT,
     region            TEXT,
+    country           TEXT,
+    sector_rank       INTEGER,
+    sector_count      INTEGER,
     currency          TEXT,
     price             REAL,
     detail_json       TEXT NOT NULL
@@ -136,6 +139,19 @@ class Database:
             conn.execute(
                 "ALTER TABLE runs ADD COLUMN sector_medians_json TEXT DEFAULT '{}'"
             )
+        # Pays de l'emetteur et rang sectoriel : ajoutes apres coup, donc
+        # absents des bases creees par une version anterieure. Sans cette
+        # migration, l'enregistrement echouerait sur une base existante.
+        colonnes_scores = {
+            row["name"] for row in conn.execute("PRAGMA table_info(scores)").fetchall()
+        }
+        for colonne, definition in (
+            ("country", "TEXT"),
+            ("sector_rank", "INTEGER"),
+            ("sector_count", "INTEGER"),
+        ):
+            if colonne not in colonnes_scores:
+                conn.execute(f"ALTER TABLE scores ADD COLUMN {colonne} {definition}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -202,6 +218,7 @@ class Database:
                     run_id, s.ticker, computed, s.composite, ranks.get(s.ticker),
                     s.window_years, s.coverage, int(s.ranked), s.exclusion_reason,
                     s.name, s.sector, s.region, s.currency, s.price,
+                    s.country, s.sector_rank, s.sector_count,
                     json.dumps(_score_payload(s), ensure_ascii=False),
                 )
             )
@@ -211,8 +228,9 @@ class Database:
             conn.executemany(
                 """INSERT INTO scores (run_id, ticker, computed_at, composite, rank,
                        window_years, coverage, ranked, exclusion_reason, name, sector,
-                       region, currency, price, detail_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       region, currency, price, country, sector_rank, sector_count,
+                       detail_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 rows,
             )
             conn.executemany(
@@ -412,6 +430,7 @@ def score_from_row(row: dict[str, Any]) -> StockScore:
                     value=c.get("value"), score=c.get("score"),
                     weight=float(c.get("weight", 0.0)), pillar=key,
                     detail=c.get("detail", ""), reason_missing=c.get("reason_missing", ""),
+                    not_applicable=bool(c.get("not_applicable", False)),
                 )
                 for c in bloc.get("criteria", [])
             ],
@@ -421,6 +440,9 @@ def score_from_row(row: dict[str, Any]) -> StockScore:
         ticker=row["ticker"], name=row.get("name"), sector=row.get("sector"),
         region=row.get("region"), currency=row.get("currency"), price=row.get("price"),
         composite=row.get("composite"),
+        country=row.get("country"),
+        sector_rank=row.get("sector_rank"),
+        sector_count=row.get("sector_count"),
         pillars=pillars,
         window_years=int(row.get("window_years") or 0),
         coverage=float(row.get("coverage") or 0.0),
@@ -454,6 +476,7 @@ def _score_payload(score: StockScore) -> dict[str, Any]:
                         "weight": c.weight,
                         "detail": c.detail,
                         "reason_missing": c.reason_missing,
+                        "not_applicable": c.not_applicable,
                     }
                     for c in p.criteria
                 ],

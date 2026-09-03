@@ -44,6 +44,26 @@ FLOW_TAGS: dict[str, tuple[str, ...]] = {
         "DepreciationAndAmortization",
         "AmortizationOfIntangibleAssets",
     ),
+    "gross_profit": ("GrossProfit",),
+    # Tresorerie : postes obligatoires du tableau de flux americain.
+    "operating_cash_flow": (
+        "NetCashProvidedByUsedInOperatingActivities",
+        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    ),
+    "capex": (
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+        "PaymentsToAcquireProductiveAssets",
+        "PaymentsForCapitalImprovements",
+    ),
+    "interest_expense": (
+        "InterestExpense",
+        "InterestExpenseDebt",
+        "InterestIncomeExpenseNet",
+    ),
+    "shares_diluted": (
+        "WeightedAverageNumberOfDilutedSharesOutstanding",
+        "WeightedAverageNumberOfSharesOutstandingBasic",
+    ),
     "eps_diluted": ("EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"),
     "dividend_per_share": (
         "CommonStockDividendsPerShareDeclared",
@@ -60,6 +80,7 @@ INSTANT_TAGS: dict[str, tuple[str, ...]] = {
     "short_term_investments": ("ShortTermInvestments", "MarketableSecuritiesCurrent"),
     "current_assets": ("AssetsCurrent",),
     "current_liabilities": ("LiabilitiesCurrent",),
+    "total_assets": ("Assets",),
     "long_term_debt": ("LongTermDebtNoncurrent", "LongTermDebt"),
     "short_term_debt": ("LongTermDebtCurrent", "DebtCurrent", "ShortTermBorrowings"),
 }
@@ -245,6 +266,16 @@ class EdgarClient:
             std = instants["short_term_debt"].get(fy)
             total_debt = None if ltd is None and std is None else (ltd or 0.0) + (std or 0.0)
 
+            # Capex et charge d'interets sont declares en valeur positive dans
+            # les balises XBRL de paiement, mais certains emetteurs signent la
+            # sortie de tresorerie. On normalise, comme pour Yahoo.
+            ocf = flows["operating_cash_flow"].get(fy)
+            capex = flows["capex"].get(fy)
+            capex = None if capex is None else abs(capex)
+            interet = flows["interest_expense"].get(fy)
+            interet = None if interet is None else abs(interet)
+            fcf = None if ocf is None or capex is None else ocf - capex
+
             cash = instants["cash"].get(fy)
             sti = instants["short_term_investments"].get(fy)
             cash_total = None if cash is None else cash + (sti or 0.0)
@@ -268,8 +299,16 @@ class EdgarClient:
                         "cash": cash_total,
                         "current_assets": instants["current_assets"].get(fy),
                         "current_liabilities": instants["current_liabilities"].get(fy),
+                        "total_assets": instants["total_assets"].get(fy),
+                        "gross_profit": flows["gross_profit"].get(fy),
                         "eps_diluted": flows["eps_diluted"].get(fy),
                         "dividend_per_share": flows["dividend_per_share"].get(fy),
+                        "operating_cash_flow": ocf,
+                        "capex": capex,
+                        "free_cash_flow": fcf,
+                        "depreciation_amortisation": da,
+                        "interest_expense": interet,
+                        "shares_diluted": flows["shares_diluted"].get(fy),
                     },
                 )
             )

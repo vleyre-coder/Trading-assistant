@@ -1,0 +1,67 @@
+# =====================================================================
+# Correspondance ticker -> raison sociale du deposant ESEF
+# ---------------------------------------------------------------------
+# Les depots europeens au format ESEF sont publies sur filings.xbrl.org,
+# index gratuit et sans cle de l'autorite XBRL. Les societes y sont
+# identifiees par leur RAISON SOCIALE exacte et par leur code LEI, jamais
+# par leur ticker : cette table fait le lien.
+#
+# Pourquoi cette source : Yahoo Finance ne remonte que quatre exercices
+# pour les titres europeens, contre cinq via EDGAR pour les americains.
+# L'ecart n'est pas anodin — un taux de croissance annuel moyen sur quatre
+# ans et un sur cinq ans ne sont pas comparables, et c'est l'une des
+# raisons pour lesquelles aucune valeur europeenne n'apparaissait dans les
+# vingt premieres places du classement.
+#
+# Les noms ci-dessous ont ete verifies un a un contre l'index ESEF le
+# 2 septembre 2026 (7 321 deposants recenses). Le filtre de l'API exige
+# une correspondance EXACTE : une faute de frappe se traduit par une
+# absence silencieuse de donnees, pas par une erreur.
+#
+# Pour ajouter une valeur europeenne, chercher son nom de deposant sur
+# https://filings.xbrl.org/ et le recopier tel quel.
+# =====================================================================
+
+deposants:
+  "AC.PA": "ACCOR"
+  "ACA.PA": "CREDIT AGRICOLE SA"
+  "AI.PA": "L'AIR LIQUIDE SOCIETE ANONYME POUR L'ETUDE ET L'EXPLOITATION DES PROCEDES GEORGES CLAUDE"
+  "AIR.PA": "AIRBUS SE"
+  "ALO.PA": "ALSTOM"
+  "BN.PA": "DANONE"
+  "BNP.PA": "BNP PARIBAS"
+  "CA.PA": "CARREFOUR"
+  "CAP.PA": "CAPGEMINI"
+  "CS.PA": "AXA"
+  "DG.PA": "VINCI"
+  "DSY.PA": "DASSAULT SYSTEMES"
+  "EDEN.PA": "EDENRED"
+  "EL.PA": "ESSILORLUXOTTICA"
+  "EN.PA": "BOUYGUES"
+  "ENGI.PA": "ENGIE"
+  "ERF.PA": "EUROFINS SCIENTIFIC SE"
+  "GLE.PA": "SOCIETE GENERALE"
+  "HO.PA": "THALES"
+  "KER.PA": "KERING"
+  "LR.PA": "LEGRAND"
+  "MC.PA": "LVMH MOET HENNESSY LOUIS VUITTON"
+  "ML.PA": "COMPAGNIE GENERALE DES ETABLISSEMENTS MICHELIN"
+  "MT.AS": "ArcelorMittal"
+  "OR.PA": "L'OREAL"
+  "ORA.PA": "ORANGE"
+  "PUB.PA": "PUBLICIS GROUPE SA"
+  "RI.PA": "PERNOD RICARD"
+  "RMS.PA": "HERMES INTERNATIONAL"
+  "RNO.PA": "RENAULT"
+  "SAF.PA": "SAFRAN"
+  "SAN.PA": "SANOFI"
+  "SGO.PA": "COMPAGNIE DE SAINT-GOBAIN"
+  "STLAP.PA": "STELLANTIS N.V."
+  "STMPA.PA": "STMICROELECTRONICS N.V."
+  "SU.PA": "SCHNEIDER ELECTRIC SE"
+  "TEP.PA": "TELEPERFORMANCE SE"
+  "TTE.PA": "TotalEnergies SE"
+  "URW.PA": "UNIBAIL-RODAMCO-WESTFIELD SE"
+  "VIE.PA": "VEOLIA ENVIRONNEMENT"
+  "VIV.PA": "VIVENDI SE"
+  "WLN.PA": "WORLDLINE"

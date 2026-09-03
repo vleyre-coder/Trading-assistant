@@ -858,14 +858,33 @@
     const entete = creer("div", "carte-entete");
     const bloc = creer("div");
     bloc.append(creer("h2", null, `${titre.name || titre.ticker} (${titre.ticker})`));
-    const meta = [titre.sector, titre.region].filter(Boolean).join(" · ");
+    // Siège social de l'émetteur, et non la seule place de cotation : ARM et
+    // AstraZeneca sont britanniques, ASML néerlandais, tous cotés au Nasdaq
+    // donc étiquetés « US ». C'est un rattachement juridique, pas une mesure
+    // d'exposition : PDD Holdings est domicilié en Irlande, MercadoLibre en
+    // Uruguay, et leurs marchés sont ailleurs.
+    const lieu =
+      titre.country && titre.country !== titre.region
+        ? `${titre.region} · siège ${titre.country}`
+        : titre.region;
+    const meta = [titre.sector, lieu].filter(Boolean).join(" · ");
+    // Le classement général repose sur des seuils absolus : un distributeur ne
+    // peut structurellement pas atteindre la marge d'un éditeur de logiciels.
+    // Le rang sectoriel répond à l'autre question, « le meilleur de sa
+    // catégorie », sans rien changer au score.
+    const rangSecteur =
+      titre.sector_rank && titre.sector_count
+        ? `  Dans son secteur : n°${titre.sector_rank} sur ${titre.sector_count}.`
+        : "";
     bloc.append(
       creer(
         "p",
         "note",
         (titre.rank
           ? `Classé n°${titre.rank} sur les critères fondamentaux retenus — voici pourquoi.`
-          : "Titre non classé : voir le motif ci-dessous.") + (meta ? `  ${meta}` : "")
+          : "Titre non classé : voir le motif ci-dessous.") +
+          rangSecteur +
+          (meta ? `  ${meta}` : "")
       )
     );
     entete.append(bloc);
@@ -987,18 +1006,31 @@
   }
 
   function blocCritere(critere, libellePilier) {
-    const bloc = creer("div", "critere");
+    // Un critère sans objet pour le secteur n'est pas une lacune : une banque
+    // n'a pas de ratio de liquidité générale, une société en perte n'a pas de
+    // P/E. Les présenter comme des données manquantes laisserait croire à un
+    // défaut de la source, et à un classement bâti sur du vide.
+    const sansObjet = critere.not_applicable === true;
+    const bloc = creer("div", sansObjet ? "critere sans-objet" : "critere");
     const entete = creer("div", "entete");
     entete.append(creer("span", "titre", critere.label));
-    entete.append(creer("span", "etiquette", libellePilier));
+    entete.append(creer("span", "etiquette", sansObjet ? "sans objet" : libellePilier));
     entete.append(
-      creer("span", "chiffre principal", `${valeurCritere(critere.value, critere.unit)}`)
+      creer(
+        "span",
+        "chiffre principal",
+        sansObjet ? "—" : `${valeurCritere(critere.value, critere.unit)}`
+      )
     );
     entete.append(
       creer(
         "span",
         "chiffre",
-        critere.score === null ? "sous-score n/d" : `sous-score ${nombre(critere.score, 1)}/100`
+        sansObjet
+          ? "non retenu dans la note"
+          : critere.score === null
+            ? "sous-score n/d"
+            : `sous-score ${nombre(critere.score, 1)}/100`
       )
     );
     bloc.append(entete);

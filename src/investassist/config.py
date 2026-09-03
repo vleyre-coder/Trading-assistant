@@ -37,8 +37,38 @@ class Criterion:
     points: list[tuple[float, float]]
     enabled: bool = True
     relative_to_peers: bool = False
+    # Secteurs pour lesquels le critere n'a pas de sens (il sera marque « non
+    # applicable » et son poids redistribue), secteurs auxquels il est au
+    # contraire reserve, et baremes propres a un secteur.
+    sectors_excluded: tuple[str, ...] = ()
+    sectors_only: tuple[str, ...] = ()
+    sector_points: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
+    # Conditions prealables portant sur le titre lui-meme, et non sur son
+    # secteur. Voir PRECONDITIONS dans scoring.py pour la liste reconnue.
+    requires: tuple[str, ...] = ()
 
-    def score(self, value: float | None) -> float | None:
+    def applies_to(self, sector: str | None) -> bool:
+        """Le critere a-t-il un sens pour ce secteur ?
+
+        Un secteur inconnu (source muette) reste evalue : mieux vaut noter le
+        titre sur la base generale que de le vider de ses criteres.
+        """
+        if self.sectors_only:
+            return sector in self.sectors_only
+        return sector not in self.sectors_excluded
+
+    def points_for(self, sector: str | None) -> list[tuple[float, float]]:
+        """Bareme applicable, eventuellement propre au secteur.
+
+        Un levier de 7 fois l'EBITDA est alarmant dans l'industrie et banal
+        pour une foncière : sans bareme sectoriel, on note une structure de
+        capital normale comme un defaut.
+        """
+        if sector and sector in self.sector_points:
+            return self.sector_points[sector]
+        return self.points
+
+    def score(self, value: float | None, sector: str | None = None) -> float | None:
         """Interpolation lineaire par morceaux, bornee aux extremites."""
         if value is None:
             return None
@@ -49,7 +79,7 @@ class Criterion:
         if x != x or x in (float("inf"), float("-inf")):  # NaN / inf
             return None
 
-        pts = self.points
+        pts = self.points_for(sector)
         if x <= pts[0][0]:
             return float(pts[0][1])
         if x >= pts[-1][0]:
@@ -99,6 +129,13 @@ def load_scoring(path: Path | None = None) -> ScoringConfig:
             points=[(float(a), float(b)) for a, b in spec["points"]],
             enabled=bool(spec.get("enabled", True)),
             relative_to_peers=bool(spec.get("relative_to_peers", False)),
+            sectors_excluded=tuple(spec.get("sectors_excluded") or ()),
+            sectors_only=tuple(spec.get("sectors_only") or ()),
+            requires=tuple(spec.get("requires") or ()),
+            sector_points={
+                str(secteur): [(float(a), float(b)) for a, b in bareme]
+                for secteur, bareme in (spec.get("sector_points") or {}).items()
+            },
         )
 
     window = raw.get("window") or {}
@@ -138,6 +175,7 @@ class Settings:
     fmp_api_key: str
     fmp_base_url: str
     fmp_daily_budget: int
+    esef_enabled: bool
     database_path: Path
     cache_dir: Path
     cache_ttl_hours: float
@@ -161,6 +199,7 @@ def load_settings(path: Path | None = None) -> Settings:
     sec = raw.get("sec") or {}
     yahoo = raw.get("yahoo") or {}
     fmp = raw.get("fmp") or {}
+    esef = raw.get("esef") or {}
     storage = raw.get("storage") or {}
     alerts = raw.get("alerts") or {}
 
@@ -206,6 +245,7 @@ def load_settings(path: Path | None = None) -> Settings:
         fmp_api_key=fmp_key,
         fmp_base_url=str(fmp.get("base_url") or "https://financialmodelingprep.com/stable"),
         fmp_daily_budget=int(fmp.get("daily_request_budget", 200)),
+        esef_enabled=bool(esef.get("enabled", True)),
         # Surcharges par variables d'environnement : pratique pour une tache
         # planifiee, un second jeu de donnees, ou des tests hors ligne.
         database_path=_abs(
@@ -221,6 +261,28 @@ def load_settings(path: Path | None = None) -> Settings:
         alerts_email_enabled=email_active,
         email=email_config,
     )
+
+
+@lru_cache(maxsize=1)
+def load_esef_filers(path: Path | None = None) -> dict[str, str]:
+    """Table ticker -> raison sociale du deposant ESEF (config/esef.yaml).
+
+    Absente ou illisible, la table renvoie un dictionnaire vide : la source
+    europeenne est un complement, jamais une dependance.
+    """
+    chemin = path or dossier_configuration() / "esef.yaml"
+    if not chemin.exists():
+        return {}
+    try:
+        brut = _read_yaml(chemin)
+    except yaml.YAMLError:
+        return {}
+    deposants = brut.get("deposants") or {}
+    return {
+        str(ticker).upper(): str(nom)
+        for ticker, nom in deposants.items()
+        if isinstance(nom, str) and nom.strip()
+    }
 
 
 def load_universes(path: Path | None = None) -> dict[str, Any]:

@@ -84,10 +84,26 @@ def test_net_debt_to_ebitda_tresorerie_nette():
     assert "trésorerie nette positive" in detail
 
 
-def test_net_debt_to_ebitda_refuse_ebitda_negatif():
-    fund = build({2025: {"total_debt": 100.0, "cash": 0.0, "ebitda": -50.0}})
+def test_net_debt_to_ebitda_refuse_ebitda_et_fcf_negatifs():
+    """Sans EBITDA ni free cash flow positifs, aucune capacite de
+    remboursement ne peut etre rapportee a la dette : le critere est N/A."""
+    fund = build({2025: {"total_debt": 100.0, "cash": 0.0, "ebitda": -50.0,
+                         "free_cash_flow": -20.0}})
     value, _, missing = criteria.net_debt_to_ebitda(fund)
-    assert value is None and "EBITDA négatif" in missing
+    assert value is None
+    assert "aucune capacité de remboursement" in missing
+
+
+def test_net_debt_to_ebitda_se_replie_sur_le_free_cash_flow():
+    """Cas des editeurs de logiciels : la remuneration en actions creuse le
+    resultat comptable alors que la tresorerie rentre. Le levier reste
+    mesurable sur le free cash flow, et l'origine du chiffre est annoncee."""
+    fund = build({2025: {"total_debt": 100.0, "cash": 20.0, "ebitda": -50.0,
+                         "free_cash_flow": 40.0}})
+    value, detail, missing = criteria.net_debt_to_ebitda(fund)
+    assert missing == ""
+    assert value == pytest.approx(2.0)          # (100 - 20) / 40
+    assert "free cash flow" in detail and "EBITDA négatif" in detail
 
 
 # -------------------------------------------------------------- PEG
@@ -159,3 +175,128 @@ def test_pe_historique_exige_trois_exercices():
     fund = build({2024: {"eps_diluted": 2.0}, 2025: {"eps_diluted": 2.5}}, trailing_pe=20.0)
     value, _, missing = criteria.pe_vs_own_history(fund, None)
     assert value is None and "insuffisant" in missing
+
+
+# ------------------------------------------- criteres de tresorerie et qualite
+def test_conversion_en_tresorerie_ignore_les_exercices_deficitaires():
+    """Sur un resultat net negatif le rapport change de signe et perd tout
+    sens : l'exercice doit etre ecarte, pas produire un score flatteur."""
+    fund = build({
+        2023: {"net_income": -50.0, "free_cash_flow": -10.0},
+        2024: {"net_income": 100.0, "free_cash_flow": 90.0},
+        2025: {"net_income": 200.0, "free_cash_flow": 220.0},
+    })
+    value, detail, missing = criteria.cash_conversion(fund)
+    assert missing == ""
+    assert value == pytest.approx((0.9 + 1.1) / 2)
+    assert "2023" not in detail
+
+
+def test_conversion_en_tresorerie_absente_si_aucun_exercice_beneficiaire():
+    fund = build({2025: {"net_income": -50.0, "free_cash_flow": 10.0}})
+    value, _, missing = criteria.cash_conversion(fund)
+    assert value is None and "aucun exercice bénéficiaire" in missing
+
+
+def test_rendement_du_free_cash_flow_reste_calculable_en_perte():
+    """Interet du critere : une societe sans benefice comptable peut degager
+    de la tresorerie, la ou le P/E n'existe pas."""
+    fund = build({2025: {"net_income": -10.0, "free_cash_flow": 500.0}},
+                 market_cap=10_000.0)
+    value, _, missing = criteria.fcf_yield(fund)
+    assert missing == "" and value == pytest.approx(0.05)
+
+
+def test_rendement_du_free_cash_flow_negatif_est_une_information():
+    """Un FCF negatif doit produire une valeur (donc un score plancher), pas
+    une absence de donnee."""
+    fund = build({2025: {"free_cash_flow": -200.0}}, market_cap=10_000.0)
+    value, detail, missing = criteria.fcf_yield(fund)
+    assert missing == "" and value == pytest.approx(-0.02)
+    assert "trésorerie consommée" in detail
+
+
+def test_roce_calculable_malgre_des_fonds_propres_negatifs():
+    """Cas Starbucks : rachats d'actions superieurs aux benefices accumules.
+    Le ROE n'a plus de sens, le ROCE si."""
+    fund = build({2025: {"operating_income": 100.0, "total_assets": 1000.0,
+                         "current_liabilities": 500.0, "equity": -200.0,
+                         "net_income": 80.0}})
+    roce, _, missing = criteria.roce_avg(fund)
+    assert missing == "" and roce == pytest.approx(0.2)
+    roe, _, roe_missing = criteria.roe_avg(fund)
+    assert roe is None
+    # Le message doit nommer la vraie cause, pas pretendre a une donnee absente.
+    assert "négatifs" in roe_missing and "absent" not in roe_missing
+
+
+def test_marge_brute_moyenne():
+    fund = build({
+        2024: {"revenue": 1000.0, "gross_profit": 400.0},
+        2025: {"revenue": 2000.0, "gross_profit": 1000.0},
+    })
+    value, _, missing = criteria.gross_margin_avg(fund)
+    assert missing == "" and value == pytest.approx(0.45)
+
+
+def test_evolution_du_nombre_d_actions_distingue_rachat_et_dilution():
+    rachat = build({2023: {"shares_diluted": 110.0}, 2025: {"shares_diluted": 100.0}})
+    value, detail, missing = criteria.share_count_trend(rachat)
+    assert missing == "" and value > 0 and "réduction" in detail
+
+    dilution = build({2023: {"shares_diluted": 100.0}, 2025: {"shares_diluted": 121.0}})
+    value, detail, _ = criteria.share_count_trend(dilution)
+    assert value == pytest.approx(-0.10) and "dilution" in detail
+
+
+def test_couverture_des_interets_sans_dette_ne_penalise_pas():
+    """Aucune charge d'interets et aucune dette : c'est une force, pas une
+    donnee manquante."""
+    fund = build({2025: {"operating_income": 500.0, "total_debt": 0.0}})
+    value, detail, missing = criteria.interest_coverage(fund)
+    assert missing == "" and value == 100.0
+    assert "aucune charge d'intérêts" in detail
+
+
+def test_couverture_des_interets_ne_conclut_pas_si_dette_sans_charge_publiee():
+    fund = build({2025: {"operating_income": 500.0, "total_debt": 900.0}})
+    value, _, missing = criteria.interest_coverage(fund)
+    assert value is None and missing != ""
+
+
+def test_valeur_entreprise_sur_chiffre_d_affaires():
+    fund = build({2025: {"revenue": 1000.0, "total_debt": 300.0, "cash": 100.0}},
+                 market_cap=5000.0)
+    value, _, missing = criteria.ev_to_sales(fund)
+    assert missing == "" and value == pytest.approx(5.2)   # (5000 + 200) / 1000
+
+
+def test_fonds_propres_sur_actif_signale_les_capitaux_negatifs():
+    fund = build({2025: {"equity": -100.0, "total_assets": 1000.0}})
+    value, detail, missing = criteria.equity_to_assets(fund)
+    assert missing == "" and value == pytest.approx(-0.1)
+    assert "négatifs" in detail
+
+
+def test_pe_historique_utilise_la_mediane_et_signale_l_exercice_atypique():
+    """Un exercice a benefice quasi nul produit un P/E de plusieurs centaines.
+    La moyenne le laisserait passer pour une decote ; la mediane non."""
+    import pandas as pd
+
+    fund = build(
+        {
+            2021: {"eps_diluted": 0.10},   # exercice atypique -> P/E ~1000
+            2022: {"eps_diluted": 5.0},
+            2023: {"eps_diluted": 5.0},
+            2024: {"eps_diluted": 5.0},
+        },
+        trailing_pe=20.0,
+    )
+    index = pd.to_datetime([f"{y}-12-31" for y in (2021, 2022, 2023, 2024)])
+    prices = pd.DataFrame({"Close": [100.0] * 4}, index=index)
+
+    value, detail, missing = criteria.pe_vs_own_history(fund, prices)
+    assert missing == ""
+    # Serie de P/E : 1000, 20, 20, 20 -> mediane 20, moyenne 265.
+    assert value == pytest.approx(1.0)      # avec la moyenne : 0,075, soit 100/100
+    assert "médiane" in detail and "atypique" in detail

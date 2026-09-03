@@ -23,6 +23,7 @@ from . import scoring
 from .config import ScoringConfig, Settings, load_universes
 from .fundamentals import FundamentalsService
 from .models import Fundamentals, StockScore
+from .providers.fmp import FmpClient
 from .storage import Database
 
 log = logging.getLogger(__name__)
@@ -100,6 +101,36 @@ class Screener:
         self.cfg = scoring_config
         self.service = service or FundamentalsService(settings)
         self.db = database
+        # Controle croise optionnel. Sans cle d'API, le client se declare
+        # desactive et n'emet aucune requete : le comportement par defaut est
+        # donc inchange, mais le module n'est plus du code mort.
+        self.fmp = FmpClient(settings, self.service.cache)
+        if self.fmp.enabled:
+            log.info(
+                "Contrôle croisé FMP actif (%s requêtes restantes aujourd'hui).",
+                self.fmp.budget_left(),
+            )
+
+    def _controler_par_fmp(self, ticker: str, score: StockScore) -> None:
+        """Confronte nos ratios a ceux de FMP et signale les ecarts notables.
+
+        Ce n'est pas une source de verite : les definitions divergent
+        legitimement d'un fournisseur a l'autre (EBITDA, dette nette). Un
+        ecart de plus de 25 % signale en revanche une erreur possible dans
+        notre lecture des balises comptables, ce qu'aucun test unitaire ne
+        peut detecter puisque les deux dependent des memes donnees d'entree.
+        """
+        if not self.fmp.enabled:
+            return
+        calcules = {
+            c.key: c.value for c in score.criteria_flat() if c.value is not None
+        }
+        try:
+            ecarts = self.fmp.cross_check(ticker, calcules)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Contrôle croisé FMP indisponible pour %s : %s", ticker, exc)
+            return
+        score.warnings.extend(ecarts)
 
     # --------------------------------------------------------------- passe 1
     def _load_one(
@@ -177,9 +208,11 @@ class Screener:
                 sector_medians=medians,
                 raw_values=raw_values.get(ticker),
             )
+            self._controler_par_fmp(ticker, score)
             scores.append(score)
 
         ranked = scoring.rank(scores)
+        scoring.assign_sector_ranks(ranked)
         excluded = scoring.excluded(scores)
         last_earnings = {
             ticker.upper(): str(fund.snapshot.last_earnings_date)
