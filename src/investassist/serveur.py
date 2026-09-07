@@ -30,7 +30,7 @@ from . import export, scoring
 from .alerts import Notifier, evaluate_rules
 from .alerts.rules import attach_earnings_dates
 from .chemins import dossier_donnees, dossier_site, resume as resume_chemins
-from .config import ScoringConfig, Settings, load_universes
+from .config import ScoringConfig, Settings, load_profils, load_universes
 from .fundamentals import FundamentalsService
 from .screener import Screener, tickers_for
 from .storage import ALERT_KINDS, Database, score_from_row
@@ -169,6 +169,68 @@ class Application:
     def etat_analyse(self) -> dict[str, Any]:
         with self._verrou:
             return dict(self.analyse)
+
+    # -------------------------------------------------------------- profils
+    def classement(self, profil_cle: str | None = None) -> dict[str, Any] | None:
+        """Classement de la derniere analyse, vu par un profil donne.
+
+        Aucun appel reseau et aucun recalcul de critere : on repart des
+        sous-scores deja enregistres et on change seulement leur
+        ponderation. Passer d'un profil a l'autre est donc instantane, meme
+        hors connexion.
+        """
+        profils = load_profils()
+        profil = profils.get(profil_cle)
+        if profil is None:
+            return None
+
+        derniere = self.db.last_run()
+        if derniere is None:
+            return None
+        scores = [
+            score_from_row(dict(ligne))
+            for ligne in self.db.scores_for_run(int(derniere["id"]))
+        ]
+        if not scores:
+            return None
+
+        retenus, ecartes = scoring.classer_selon_profil(scores, self.cfg, profil)
+        # Le classement de reference reste la source des metadonnees
+        # (univers analyses, date, duree) : le profil ne rejoue pas l'analyse.
+        reference = export.read_json(self.fichier_donnees("ranking.json")) or {}
+        charge = export.ranking_payload(
+            retenus, ecartes, reference.get("failures") or {}, self.cfg,
+            universes=reference.get("universes") or [],
+            generated_at=datetime.fromisoformat(reference["generated_at"])
+            if reference.get("generated_at") else datetime.now(),
+            duration_seconds=reference.get("duration_seconds") or 0.0,
+        )
+        charge["profil"] = {
+            "cle": profil.cle,
+            "label": profil.label,
+            "resume": profil.resume,
+            "description": profil.description,
+            "par_defaut": profil.par_defaut,
+        }
+        return charge
+
+    def profils_disponibles(self) -> dict[str, Any]:
+        profils = load_profils()
+        return {
+            "defaut": profils.defaut,
+            "profils": [
+                {
+                    "cle": p.cle,
+                    "label": p.label,
+                    "resume": p.resume,
+                    "description": p.description,
+                    "par_defaut": p.par_defaut,
+                    "piliers": p.pillar_weights,
+                    "exigences": p.exigences,
+                }
+                for p in profils.profils.values()
+            ],
+        }
 
     # -------------------------------------------------------------- titres
     def detail_titre(self, ticker: str) -> dict[str, Any] | None:
@@ -356,6 +418,29 @@ def construire_gestionnaire(app: Application):
                         "alertes_email": app.settings.alerts_email_enabled,
                     }
                 )
+
+            if chemin == "/api/profils":
+                return self._json(app.profils_disponibles())
+
+            if chemin == "/api/classement":
+                demande = parse_qs(urlparse(self.path).query).get("profil", [""])[0]
+                # Deux causes d'echec bien distinctes : un profil qui n'existe
+                # pas est une erreur d'appel, une base encore vide est un etat
+                # normal au premier lancement. Les confondre enverrait
+                # l'utilisateur chercher au mauvais endroit.
+                connus = load_profils().profils
+                if demande and demande not in connus:
+                    return self._erreur(
+                        400,
+                        f"profil inconnu « {demande} » — profils disponibles : "
+                        + ", ".join(connus),
+                    )
+                charge = app.classement(demande or None)
+                if charge is None:
+                    return self._erreur(
+                        404, "aucune analyse enregistrée : lancez une analyse d'abord"
+                    )
+                return self._json(charge)
 
             if chemin == "/api/watchlist":
                 return self._json({"titres": app.db.watchlist()})

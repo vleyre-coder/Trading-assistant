@@ -297,3 +297,97 @@ def cached_settings() -> Settings:
 @lru_cache(maxsize=1)
 def cached_scoring() -> ScoringConfig:
     return load_scoring()
+
+
+@dataclass(frozen=True)
+class Profil:
+    """Un profil d'investissement : une facon de ponderer les memes criteres.
+
+    Un profil ne change aucune donnee et n'ajoute aucun critere. Il change
+    l'importance relative accordee a chacun, donc la question posee au
+    classement. Changer de profil deplace le classement sans qu'aucun
+    fondamental n'ait bouge : c'est attendu, et l'interface doit le dire.
+    """
+
+    cle: str
+    label: str
+    resume: str
+    description: str
+    pillar_weights: dict[str, float] = field(default_factory=dict)
+    criteria_weights: dict[str, float] = field(default_factory=dict)
+    # Criteres dont le sens est RETOURNE pour ce profil : le sous-score
+    # devient 100 - score. Sert a exprimer une these assumee plutot qu'a
+    # dupliquer un critere. Exemple : pour « fort potentiel », une petite
+    # capitalisation est un avantage — une societe de 500 milliards ne peut
+    # pas decupler aussi facilement qu'une de cinq.
+    criteria_inverted: tuple[str, ...] = ()
+    exigences: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def par_defaut(self) -> bool:
+        """Profil sans aucune redefinition : la configuration d'origine."""
+        return not (
+            self.pillar_weights
+            or self.criteria_weights
+            or self.criteria_inverted
+            or self.exigences
+        )
+
+
+@dataclass(frozen=True)
+class Profils:
+    defaut: str
+    profils: dict[str, Profil]
+
+    def get(self, cle: str | None) -> Profil | None:
+        return self.profils.get(cle or self.defaut)
+
+
+@lru_cache(maxsize=1)
+def load_profils(path: Path | None = None) -> Profils:
+    """Charge config/profils.yaml. Absent, un profil neutre unique subsiste."""
+    chemin = path or dossier_configuration() / "profils.yaml"
+    neutre = Profils(
+        defaut="equilibre",
+        profils={
+            "equilibre": Profil(
+                cle="equilibre",
+                label="Équilibré",
+                resume="Pondération d'origine.",
+                description="",
+            )
+        },
+    )
+    if not chemin.exists():
+        return neutre
+    try:
+        brut = _read_yaml(chemin)
+    except yaml.YAMLError:
+        return neutre
+
+    profils: dict[str, Profil] = {}
+    for cle, spec in (brut.get("profils") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        profils[str(cle)] = Profil(
+            cle=str(cle),
+            label=str(spec.get("label") or cle),
+            resume=str(spec.get("resume") or ""),
+            description=str(spec.get("description") or "").strip(),
+            pillar_weights={
+                str(k): float(v) for k, v in (spec.get("pillar_weights") or {}).items()
+            },
+            criteria_weights={
+                str(k): float(v) for k, v in (spec.get("criteria_weights") or {}).items()
+            },
+            criteria_inverted=tuple(spec.get("criteria_inverted") or ()),
+            exigences={
+                str(k): float(v) for k, v in (spec.get("exigences") or {}).items()
+            },
+        )
+    if not profils:
+        return neutre
+    defaut = str(brut.get("defaut") or next(iter(profils)))
+    if defaut not in profils:
+        defaut = next(iter(profils))
+    return Profils(defaut=defaut, profils=profils)

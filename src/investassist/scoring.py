@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import statistics
+from dataclasses import replace
 from datetime import datetime
 
 import pandas as pd
@@ -152,8 +153,13 @@ def score_stock(
     # --- Sous-scores par pilier ---------------------------------------
     for pillar, pillar_weight in cfg.pillar_weights.items():
         members = cfg.criteria_for(pillar)
-        if pillar_weight <= 0 or not members:
+        if not members:
             continue
+        # Un pilier a poids nul est tout de meme CALCULE : un profil peut lui
+        # donner un poids reel sans qu'aucune donnee soit rechargee. Il
+        # n'entre pas dans le score composite pour autant, puisque sa
+        # contribution y est multipliee par zero — la ponderation d'origine
+        # reste donc strictement inchangee.
 
         results: list[CriterionResult] = []
         for criterion in members:
@@ -334,3 +340,168 @@ def to_dataframe(scores: list[StockScore]) -> pd.DataFrame:
         frame = frame.sort_values("score", ascending=False, na_position="last")
         frame.insert(0, "rang", range(1, len(frame) + 1))
     return frame.reset_index(drop=True)
+
+
+# =====================================================================
+# Profils : la meme donnee, une autre question
+# =====================================================================
+def _exigences_non_tenues(score: StockScore, profil) -> list[str]:
+    """Seuils propres au profil qui ecartent un titre du classement.
+
+    Distincts des regles de qualite de donnees : ici le titre est
+    parfaitement mesure, il ne correspond simplement pas a ce qui est
+    recherche. Le motif doit donc le dire dans ces termes.
+    """
+    motifs: list[str] = []
+    exigences = profil.exigences
+
+    plancher = exigences.get("couverture_minimale")
+    if plancher is not None and score.coverage < plancher:
+        motifs.append(
+            f"couverture des critères de {score.coverage * 100:.0f} %, "
+            f"minimum {plancher * 100:.0f} % pour ce profil"
+        )
+
+    plafond = exigences.get("dette_nette_ebitda_max")
+    if plafond is not None:
+        critere = score.criterion("net_debt_to_ebitda")
+        # Un critere sans objet (une banque) ne peut pas manquer a
+        # l'exigence : la question ne se pose pas pour elle.
+        if critere and critere.value is not None and not critere.not_applicable:
+            if critere.value > plafond:
+                motifs.append(
+                    f"endettement de {critere.value:.1f} fois l'EBITDA, "
+                    f"maximum {plafond:.0f} pour ce profil"
+                )
+
+    volatilite_max = exigences.get("volatilite_max")
+    if volatilite_max is not None:
+        critere = score.criterion("volatility")
+        if critere and critere.value is not None and critere.value > volatilite_max:
+            motifs.append(
+                f"volatilité annualisée de {critere.value * 100:.0f} %, "
+                f"maximum {volatilite_max * 100:.0f} % pour ce profil"
+            )
+
+    plancher_marge = exigences.get("marge_nette_moyenne_min")
+    if plancher_marge is not None:
+        critere = score.criterion("net_margin_avg")
+        if critere and critere.value is not None and critere.value < plancher_marge:
+            motifs.append(
+                f"marge nette moyenne de {critere.value * 100:.1f} %, "
+                "profil réservé aux sociétés bénéficiaires"
+            )
+    return motifs
+
+
+def appliquer_profil(score: StockScore, cfg: ScoringConfig, profil) -> StockScore:
+    """Renote un titre selon un profil, sans recalculer aucun critere.
+
+    Les valeurs et sous-scores par critere ne dependent que des comptes de
+    la societe : ils sont conserves tels quels. Seule leur ponderation
+    change, donc les scores de pilier, le score composite et l'admission au
+    classement. Le recalcul est instantane et hors ligne.
+
+    L'objet d'origine n'est jamais modifie : l'interface doit pouvoir
+    passer d'un profil a l'autre et revenir.
+    """
+    if profil is None or profil.par_defaut:
+        return score
+
+    copie = replace(
+        score,
+        pillars={},
+        warnings=list(score.warnings),
+        ranked=score.ranked,
+        exclusion_reason=score.exclusion_reason,
+    )
+
+    poids_piliers = dict(cfg.pillar_weights)
+    poids_piliers.update(profil.pillar_weights)
+    total = sum(v for v in poids_piliers.values() if v > 0)
+    if total <= 0:
+        return score
+
+    for cle, pilier in score.pillars.items():
+        poids = poids_piliers.get(cle, pilier.weight)
+        criteres = []
+        for c in pilier.criteria:
+            poids_critere = profil.criteria_weights.get(c.key, c.weight)
+            sous_score = c.score
+            detail = c.detail
+            if c.key in profil.criteria_inverted and sous_score is not None:
+                # Sens retourne pour ce profil : la valeur brute reste
+                # affichee telle quelle, seul le jugement porte sur elle
+                # change. Le detail le dit, sans quoi un lecteur verrait un
+                # sous-score incoherent avec le chiffre a cote.
+                sous_score = 100.0 - sous_score
+                detail = (
+                    f"{detail} — critère inversé pour ce profil : une valeur "
+                    "plus faible est ici recherchée"
+                ).lstrip(" —")
+            criteres.append(replace(c, weight=poids_critere, score=sous_score, detail=detail))
+        applicables = [c for c in criteres if not c.not_applicable]
+        total_criteres = sum(c.weight for c in applicables) or 1.0
+        disponible = sum(c.weight for c in applicables if c.available)
+        couverture = disponible / total_criteres
+
+        if pilier.neutralized and pilier.score is not None:
+            # Pilier dividende neutralise (titre qui ne distribue pas) :
+            # le score neutre est conserve, mais son poids peut tomber a
+            # zero selon le profil.
+            recalcule = PillarResult(
+                key=cle, weight=poids, score=pilier.score, coverage=1.0,
+                criteria=criteres, neutralized=True,
+            )
+        elif not applicables or couverture < cfg.min_pillar_coverage:
+            recalcule = PillarResult(
+                key=cle, weight=poids, score=None, coverage=couverture,
+                criteria=criteres, neutralized=True,
+            )
+        else:
+            pondere = sum(c.score * c.weight for c in applicables if c.available)
+            recalcule = PillarResult(
+                key=cle, weight=poids, score=pondere / disponible,
+                coverage=couverture, criteria=criteres,
+            )
+        copie.pillars[cle] = recalcule
+
+    retenus = [p for p in copie.pillars.values() if p.score is not None and p.weight > 0]
+    somme = sum(p.weight for p in retenus)
+    copie.composite = (
+        sum(p.score * p.weight for p in retenus) / somme if retenus and somme > 0 else None
+    )
+    copie.coverage = (
+        sum(p.weight * (1.0 if p.score is not None else 0.0) * max(p.coverage, 0.0)
+            for p in copie.pillars.values())
+        / total
+    )
+
+    # Un titre deja ecarte pour donnees insuffisantes le reste : un profil
+    # ne repare pas une lacune de mesure.
+    if not score.ranked:
+        copie.ranked = False
+        return copie
+
+    motifs = _exigences_non_tenues(copie, profil)
+    if copie.composite is None:
+        motifs.append("aucun pilier calculable avec cette pondération")
+    if motifs:
+        copie.ranked = False
+        copie.exclusion_reason = (
+            f"Ne correspond pas au profil « {profil.label} » — " + " ; ".join(motifs)
+        )
+    else:
+        copie.ranked = True
+        copie.exclusion_reason = ""
+    return copie
+
+
+def classer_selon_profil(
+    scores: list[StockScore], cfg: ScoringConfig, profil
+) -> tuple[list[StockScore], list[StockScore]]:
+    """Applique un profil a une liste de titres, puis les trie."""
+    renotes = [appliquer_profil(s, cfg, profil) for s in scores]
+    retenus = rank(renotes)
+    assign_sector_ranks(retenus)
+    return retenus, excluded(renotes)

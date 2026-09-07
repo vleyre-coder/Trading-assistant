@@ -40,6 +40,15 @@ pillar_weights:
   balance_sheet: 0.15
   dividend: 0.05         # faible : ne penalise pas les valeurs de croissance
   qualitative: 0.00      # phase 2 (ton des communiques) — inactif par defaut
+  # Regularite et risque : poids NUL dans la ponderation d'origine, qui reste
+  # donc strictement inchangee. Ce pilier n'existe que pour le profil
+  # « Sécurisé », qui lui donne un poids reel (voir config/profils.yaml).
+  # Sans lui, un profil defensif se reduisait a reponderer des criteres de
+  # qualite, et la meme societe de croissance arrivait en tete des quatre
+  # profils : une entreprise excellente partout gagne sous n'importe quelle
+  # ponderation, ce qui est exact mais ne repond pas a « qu'est-ce qui bouge
+  # peu ».
+  risk: 0.00
 
 # --- Criteres -------------------------------------------------------
 criteria:
@@ -316,6 +325,53 @@ criteria:
     unit: ratio
     higher_is_better: false
     points: [[0.5, 100], [1.0, 88], [2.0, 70], [4.0, 48], [8.0, 25], [15.0, 0]]
+
+  # ================= REGULARITE ET RISQUE =================
+  # Ces criteres ne mesurent pas la qualite d'une societe mais la tranquillite
+  # de sa detention. Ils sont calcules pour tous les titres et n'entrent dans
+  # le score que si un profil donne un poids au pilier « risk ».
+
+  volatility:
+    pillar: risk
+    weight: 0.40
+    label: "Volatilité annualisée du cours"
+    unit: percent
+    higher_is_better: false
+    # Ecart-type annualise des variations mensuelles. Une societe peut avoir
+    # d'excellents comptes ET un cours tres volatil : deux questions
+    # distinctes, dont une seule etait mesuree.
+    # La volatilite passee ne predit pas la volatilite future.
+    points: [[0.10, 100], [0.18, 82], [0.25, 62], [0.35, 38], [0.50, 12], [0.80, 0]]
+
+  profitable_years:
+    pillar: risk
+    weight: 0.25
+    label: "Exercices bénéficiaires sur la fenêtre"
+    unit: percent
+    higher_is_better: true
+    points: [[0.4, 0], [0.6, 30], [0.8, 65], [1.0, 100]]
+
+  margin_stability:
+    pillar: risk
+    weight: 0.20
+    label: "Régularité de la marge nette"
+    unit: ratio
+    higher_is_better: true
+    # 1 = marge constante, 0 = tres erratique. Une marge qui oscille entre
+    # 2 % et 20 % signale une activite cyclique, meme si sa moyenne flatte.
+    points: [[0.30, 0], [0.55, 35], [0.75, 70], [0.88, 92], [0.95, 100]]
+
+  market_size:
+    pillar: risk
+    weight: 0.15
+    label: "Capitalisation boursière (milliards)"
+    unit: ratio
+    higher_is_better: true
+    # Une grande capitalisation n'est pas un gage de performance ; elle
+    # reduit en revanche le risque de liquidite et la sensibilite a un
+    # evenement isole. Capitalisations comparees sans conversion de devise :
+    # l'ecart euro/dollar reste inferieur a l'echelle des paliers.
+    points: [[1.0, 0], [5.0, 35], [20.0, 65], [100.0, 90], [500.0, 100]]
 
   # ================= SIGNAL QUALITATIF (phase 2, inactif) =================
   communication_tone:

@@ -597,6 +597,112 @@ def pe_vs_own_history(fund: Fundamentals, prices: pd.DataFrame | None) -> Result
     return ratio, detail, ""
 
 
+# =====================================================================
+# Regularite et risque
+# ---------------------------------------------------------------------
+# Ces criteres ne mesurent pas la qualite d'une societe mais la
+# TRANQUILLITE de sa detention. Ils portent un poids nul dans la
+# ponderation d'origine et ne servent qu'au profil « Sécurisé ».
+#
+# Raison de leur existence : sans eux, un profil defensif se reduisait a
+# reponderer des criteres de qualite, et la meme societe de croissance
+# arrivait en tete des quatre profils. Une entreprise excellente sur tous
+# les piliers gagne sous n'importe quelle ponderation — ce qui est exact,
+# mais ne repond pas a la question « qu'est-ce qui bouge peu ».
+# =====================================================================
+
+def annualised_volatility(prices: pd.DataFrame | None) -> tuple[float | None, int]:
+    """Volatilite annualisee des rendements mensuels, et nombre de mois."""
+    if prices is None or prices.empty or "Close" not in prices:
+        return None, 0
+    try:
+        mensuel = prices["Close"].resample("ME").last().dropna()
+    except (TypeError, ValueError):
+        return None, 0
+    rendements = mensuel.pct_change().dropna()
+    if len(rendements) < 12:
+        return None, len(rendements)
+    return float(rendements.std() * (12 ** 0.5)), len(rendements)
+
+
+def volatility(fund: Fundamentals, prices: pd.DataFrame | None) -> Result:
+    """Amplitude des variations de cours sur la fenetre disponible.
+
+    Mesure a quel point le cours bouge, pas la solidite de l'entreprise.
+    Une societe peut avoir d'excellents comptes ET un cours tres volatil :
+    ce sont deux questions distinctes, et seule la premiere etait mesuree.
+
+    La volatilite passee ne dit rien de la volatilite future ; elle decrit
+    seulement le comportement observe sur la periode.
+    """
+    valeur, mois = annualised_volatility(prices)
+    if valeur is None:
+        return None, "", (
+            f"historique de cours insuffisant ({mois} mois, 12 requis) pour "
+            "mesurer la volatilité"
+        )
+    detail = (
+        f"écart-type annualisé des variations mensuelles sur {mois} mois : "
+        f"{_pct(valeur, 1)}"
+    )
+    return valeur, detail, ""
+
+
+def profitable_years(fund: Fundamentals) -> Result:
+    """Part des exercices benificiaires sur la fenetre analysee."""
+    resultats = [(r.fiscal_year, r.get("net_income")) for r in fund.sorted_annual()]
+    connus = [(y, v) for y, v in resultats if v is not None]
+    if len(connus) < 3:
+        return None, "", (
+            f"moins de trois exercices avec résultat net connu ({len(connus)})"
+        )
+    beneficiaires = [y for y, v in connus if v > 0]
+    valeur = len(beneficiaires) / len(connus)
+    perdus = [str(y) for y, v in connus if v <= 0]
+    detail = f"{len(beneficiaires)} exercices bénéficiaires sur {len(connus)}"
+    if perdus:
+        detail += f" — perte en {', '.join(perdus)}"
+    return valeur, detail, ""
+
+
+def margin_stability(fund: Fundamentals) -> Result:
+    """Regularite de la marge nette : 1 = constante, 0 = tres erratique.
+
+    Indice = 1 - (ecart-type / moyenne) de la marge nette, borne a [0, 1].
+    Une marge qui oscille entre 2 % et 20 % signale une activite cyclique,
+    meme si sa moyenne est flatteuse.
+    """
+    marges = [m for _, m in _net_margins(fund)]
+    if len(marges) < 3:
+        return None, "", f"moins de trois exercices avec marge nette ({len(marges)})"
+    moyenne = sum(marges) / len(marges)
+    if moyenne <= 0:
+        return None, "", "marge nette moyenne négative ou nulle — régularité sans objet"
+    ecart = statistics.pstdev(marges)
+    valeur = max(0.0, min(1.0 - ecart / moyenne, 1.0))
+    detail = (
+        f"marge nette de {_pct(min(marges), 1)} à {_pct(max(marges), 1)} "
+        f"(moyenne {_pct(moyenne, 1)}, écart-type {_pct(ecart, 1)})"
+    )
+    return valeur, detail, ""
+
+
+def market_size(fund: Fundamentals) -> Result:
+    """Capitalisation boursiere, en milliards.
+
+    Approximation assumee : les capitalisations sont comparees sans
+    conversion de devise. Entre euro et dollar l'ecart reste inferieur a
+    l'echelle des paliers du bareme ; il fausserait en revanche une
+    comparaison avec une devise eloignee.
+    """
+    cap = fund.snapshot.market_cap
+    if not cap or cap <= 0:
+        return None, "", "capitalisation boursière non disponible"
+    milliards = cap / 1e9
+    detail = f"{milliards:,.1f} milliards {fund.snapshot.currency or ''}".replace(",", " ")
+    return milliards, detail.strip(), ""
+
+
 # Criteres calculables titre par titre. Le critere pe_vs_sector est relatif
 # aux pairs et se calcule au niveau de l'univers (voir scoring.py).
 SINGLE_STOCK_CRITERIA = {
@@ -619,6 +725,9 @@ SINGLE_STOCK_CRITERIA = {
     "fcf_yield": fcf_yield,
     "ev_to_sales": ev_to_sales,
     "price_to_book": price_to_book,
+    "profitable_years": profitable_years,
+    "margin_stability": margin_stability,
+    "market_size": market_size,
 }
 
 
@@ -629,8 +738,10 @@ def compute_all(fund: Fundamentals, prices: pd.DataFrame | None = None) -> dict[
             results[key] = fn(fund)
         except Exception as exc:  # noqa: BLE001
             results[key] = (None, "", f"erreur de calcul ({type(exc).__name__}: {exc})")
-    try:
-        results["pe_vs_own_history"] = pe_vs_own_history(fund, prices)
-    except Exception as exc:  # noqa: BLE001
-        results["pe_vs_own_history"] = (None, "", f"erreur de calcul ({type(exc).__name__})")
+    # Criteres qui ont besoin de l'historique de cours.
+    for cle, fonction in (("pe_vs_own_history", pe_vs_own_history), ("volatility", volatility)):
+        try:
+            results[cle] = fonction(fund, prices)
+        except Exception as exc:  # noqa: BLE001
+            results[cle] = (None, "", f"erreur de calcul ({type(exc).__name__})")
     return results

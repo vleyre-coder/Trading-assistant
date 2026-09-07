@@ -1,0 +1,187 @@
+# =====================================================================
+# PROFILS D'INVESTISSEMENT — quel type de societe cherchez-vous ?
+# ---------------------------------------------------------------------
+# Un profil ne change AUCUNE donnee et n'ajoute aucun critere : il change
+# l'importance relative accordee a chacun. Le meme titre, les memes
+# chiffres, une autre question posee.
+#
+# Consequence directe, a garder en tete : changer de profil deplace le
+# classement sans qu'aucun fondamental n'ait bouge. Un titre premier en
+# « fort potentiel » et cinquantieme en « securise » n'est ni bon ni
+# mauvais — il repond bien a une question et mal a une autre.
+#
+# Le recalcul est instantane : il repart des criteres deja calcules,
+# sans aucun appel reseau.
+#
+# Chaque profil peut redefinir :
+#   pillar_weights   — le poids des cinq piliers (renormalise a 1) ;
+#   criteria_weights — le poids d'un critere DANS son pilier ;
+#   exigences        — des seuils qui ecartent un titre du classement.
+# Tout ce qui n'est pas redefini garde la valeur de config/scoring.yaml.
+# =====================================================================
+
+defaut: equilibre
+
+profils:
+
+  # ------------------------------------------------------------------
+  equilibre:
+    label: "Équilibré"
+    resume: "Aucun pilier privilégié — la référence de l'outil."
+    description: >
+      Pondération d'origine : croissance 35 %, valorisation 25 %,
+      rentabilité 20 %, bilan 15 %, dividende 5 %. À utiliser comme
+      point de comparaison des trois autres profils.
+    # Aucune redefinition : c'est exactement config/scoring.yaml.
+
+  # ------------------------------------------------------------------
+  croissance:
+    label: "Croissance"
+    resume: "Sociétés qui grandissent vite, sans payer n'importe quel prix."
+    description: >
+      Renforce la croissance et la rentabilité, allège le bilan et
+      supprime le dividende — une société en forte croissance réinvestit
+      ses bénéfices plutôt que de les distribuer, et l'absence de
+      dividende n'est pas un défaut. La valorisation reste présente à
+      20 % : c'est ce qui distingue ce profil du suivant. Une croissance
+      payée trente fois ses bénéfices reste un risque.
+    pillar_weights:
+      growth: 0.45
+      valuation: 0.20
+      profitability: 0.25
+      balance_sheet: 0.10
+      dividend: 0.00
+    criteria_weights:
+      # Dans la croissance, le chiffre d'affaires prime : il precede le
+      # benefice et se manipule moins.
+      revenue_cagr: 0.45
+      net_income_cagr: 0.30
+      net_margin_trend: 0.25
+      # Une croissance rentable en tresorerie vaut mieux qu'une
+      # croissance comptable.
+      cash_conversion: 0.25
+      roce_avg: 0.30
+      gross_margin_avg: 0.15
+      roe_avg: 0.15
+      net_margin_avg: 0.15
+
+  # ------------------------------------------------------------------
+  potentiel:
+    label: "Fort potentiel"
+    resume: "Croissance maximale, y compris sociétés pas encore rentables."
+    description: >
+      Profil délibérément offensif : la croissance pèse 60 %, la
+      valorisation tombe à 10 %. Il fait remonter des sociétés jeunes,
+      souvent déficitaires, dont le modèle n'est pas encore prouvé.
+      Le seuil de couverture des données est abaissé à 60 % pour ne pas
+      écarter les historiques courts.
+
+      Limite à connaître : sur un univers d'indices — CAC 40, Nasdaq-100 —
+      ce profil reste proche du profil « Croissance », parce que ces
+      indices ne contiennent que de grandes sociétés déjà établies. Il ne
+      prend tout son sens que sur un univers comportant des valeurs
+      moyennes, à ajouter dans config/universes.yaml.
+
+      Il retourne aussi le critère de taille : une petite capitalisation
+      devient un avantage, sur la thèse qu'une société de 500 milliards ne
+      peut pas décupler aussi facilement qu'une de cinq. C'est une thèse
+      assumée, pas un fait — elle est inscrite dans la configuration et se
+      retire en une ligne.
+
+      Ce profil sélectionne aussi, mécaniquement, une volatilité plus
+      forte et un risque de perte en capital plus élevé. Il décrit un
+      potentiel de croissance mesuré sur le passé, jamais une
+      probabilité de réussite future.
+    pillar_weights:
+      growth: 0.53
+      valuation: 0.09
+      profitability: 0.15
+      balance_sheet: 0.05
+      dividend: 0.00
+      # Sert uniquement a porter le critere de taille, retourne ci-dessous.
+      # Poids choisi par mesure, non au jugé : sur le CAC 40 + Nasdaq-100,
+      # 5 % ne deplacaient que 3 titres du top 20 par rapport au profil
+      # « Croissance », 20 % en deplacent 6 et font remonter The Trade Desk
+      # (7 Md), Lululemon (11 Md) et Accor (11 Md). Au-dela de 25 %, la
+      # taille etouffe le signal de croissance, ce qui n'est plus le sujet.
+      risk: 0.18
+    criteria_weights:
+      revenue_cagr: 0.60      # le seul critere de croissance toujours calculable
+      net_income_cagr: 0.15   # souvent sans objet ici : societes en perte
+      net_margin_trend: 0.25
+      # La valorisation se juge sur ce qui reste lisible sans benefice.
+      ev_to_sales: 0.40
+      fcf_yield: 0.30
+      peg_ratio: 0.15
+      pe_vs_own_history: 0.10
+      pe_vs_sector: 0.02
+      price_to_book: 0.03
+      # Seul critere de risque retenu ici, et retourne : les autres sont mis
+      # a zero, ce qui les retire du calcul sans les masquer de l'affichage.
+      market_size: 1.00
+      volatility: 0.00
+      profitable_years: 0.00
+      margin_stability: 0.00
+    criteria_inverted: ["market_size"]
+    exigences:
+      couverture_minimale: 0.60
+
+  # ------------------------------------------------------------------
+  securise:
+    label: "Sécurisé"
+    resume: "Bilan solide, bénéfices réguliers, dividende suivi."
+    description: >
+      Inverse le rapport de force : bilan et rentabilité dominent, la
+      croissance passe au second plan, le dividende compte réellement.
+      Il active aussi le pilier « régularité et risque », inactif partout
+      ailleurs : volatilité du cours, nombre d'exercices bénéficiaires,
+      stabilité de la marge, taille. Quatre exigences écartent du
+      classement les titres qui ne correspondent pas à la recherche —
+      volatilité annualisée supérieure à 40 %, endettement supérieur à
+      trois fois l'EBITDA, marge nette moyenne négative, ou données trop
+      incomplètes.
+
+      « Sécurisé » qualifie ici la solidité des comptes passés, et rien
+      d'autre. Aucune société cotée n'est sans risque, et un bilan sain
+      n'empêche ni une baisse de cours ni une perte en capital.
+    pillar_weights:
+      growth: 0.08
+      valuation: 0.17
+      profitability: 0.22
+      balance_sheet: 0.25
+      dividend: 0.10
+      # Seul profil a donner un poids au pilier « risque », dont les criteres
+      # sont calcules pour tous les titres mais ne comptent nulle part
+      # ailleurs. Sans lui, ce profil se reduisait a reponderer des criteres
+      # de qualite : la meme societe de croissance arrivait en tete des
+      # quatre profils, y compris celui-ci.
+      risk: 0.18
+    criteria_weights:
+      # La regularite prime sur le niveau : une marge stable vaut mieux
+      # qu'une marge elevee mais erratique.
+      net_margin_avg: 0.30
+      roce_avg: 0.25
+      cash_conversion: 0.25
+      roe_avg: 0.10
+      gross_margin_avg: 0.10
+      # Au bilan, la capacite a tenir ses echeances passe devant tout.
+      net_debt_to_ebitda: 0.35
+      interest_coverage: 0.25
+      equity_to_assets: 0.20
+      current_ratio: 0.15
+      share_count_trend: 0.05
+      # Un dividende regulier vaut mieux qu'un rendement eleve, qui
+      # signale souvent un cours qui a chute.
+      dividend_growth_streak: 0.65
+      dividend_yield: 0.35
+      # La regularite du cours prime sur la taille : une grande societe peut
+      # etre tres volatile.
+      volatility: 0.45
+      profitable_years: 0.25
+      margin_stability: 0.20
+      market_size: 0.10
+    exigences:
+      couverture_minimale: 0.75
+      dette_nette_ebitda_max: 3.0
+      marge_nette_moyenne_min: 0.0
+      volatilite_max: 0.40
