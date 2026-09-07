@@ -46,6 +46,10 @@ def _criterion_payload(criterion) -> dict[str, Any]:
     }
 
 
+# Prefixe du motif d'exclusion produit par un profil (voir scoring.py).
+HORS_PROFIL = "Ne correspond pas au profil"
+
+
 def score_payload(score: StockScore, rank: int | None = None) -> dict[str, Any]:
     return {
         "ticker": score.ticker,
@@ -96,7 +100,17 @@ def ranking_payload(
         "duration_seconds": None if duration_seconds is None else round(duration_seconds, 1),
         "counts": {
             "ranked": len(ranked),
-            "excluded": len(excluded),
+            # Deux motifs d'exclusion a ne jamais confondre : des donnees
+            # trop incompletes pour noter le titre, ou un titre parfaitement
+            # mesure qui ne correspond pas au profil recherche. Annoncer
+            # « donnees incompletes » pour le second serait faux et ferait
+            # douter de la source.
+            "excluded": sum(
+                1 for s in excluded if not s.exclusion_reason.startswith(HORS_PROFIL)
+            ),
+            "hors_profil": sum(
+                1 for s in excluded if s.exclusion_reason.startswith(HORS_PROFIL)
+            ),
             "failed": len(failures),
         },
         # L'avertissement voyage AVEC les donnees : une interface qui les

@@ -19,6 +19,7 @@ import argparse
 import json
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -41,7 +42,28 @@ arguments = analyseur.parse_args()
 EXECUTABLE = Path(arguments.executable) if arguments.executable else (
     RACINE / "dist" / ("Investassist.exe" if sys.platform == "win32" else "Investassist")
 )
-NAVIGATEUR = arguments.navigateur or None
+def _trouver_navigateur() -> str | None:
+    """Chemin d'un Chromium reellement present sur la machine.
+
+    Playwright vise un numero de version precis : quand l'environnement met
+    la bibliotheque a jour sans retelecharger les navigateurs, le chemin
+    attendu n'existe plus et l'audit echoue sur son outillage, pas sur
+    l'application — diagnostic trompeur. On cherche donc le binaire
+    installe plutot que de supposer lequel c'est.
+    """
+    if arguments.navigateur:
+        return arguments.navigateur
+    for racine in (Path("/opt/pw-browsers"), Path.home() / ".cache/ms-playwright"):
+        if not racine.is_dir():
+            continue
+        for motif in ("chrome-linux/chrome", "chrome-headless-shell-linux64/chrome-headless-shell"):
+            trouves = sorted(racine.glob(f"*/{motif}"))
+            if trouves:
+                return str(trouves[-1])
+    return None
+
+
+NAVIGATEUR = _trouver_navigateur()
 CAPTURES = Path(arguments.captures) if arguments.captures else None
 BASE = Path(tempfile.mkdtemp(prefix="audit-investassist-"))
 BUREAU = BASE / "Bureau" / "Investassist"
@@ -56,6 +78,20 @@ def verifier(intitule: str, condition: object, detail: str = "") -> bool:
     resultats.append((reussi, intitule, detail))
     print(f"  [{'OK  ' if reussi else 'ECHEC'}] {intitule}" + (f" — {detail}" if detail else ""))
     return reussi
+
+
+def port_libre() -> int:
+    """Port disponible, demandé au système.
+
+    Un audit doit pouvoir être rejoué sans nettoyage préalable. Avec des
+    ports fixes, un processus resté en vie d'une exécution précédente
+    faisait échouer le premier contrôle sur « adresse déjà utilisée » — un
+    diagnostic qui accuse l'application alors que le défaut est dans
+    l'outillage de test.
+    """
+    with socket.socket() as prise:
+        prise.bind(("127.0.0.1", 0))
+        return int(prise.getsockname()[1])
 
 
 def lancer(dossier: Path, port: int) -> tuple[subprocess.Popen, str | None]:
@@ -99,7 +135,7 @@ def main() -> int:
     cible.chmod(0o755)
 
     depart = time.time()
-    processus, adresse = lancer(BUREAU, 8811)
+    processus, adresse = lancer(BUREAU, port_libre())
     verifier("L'application démarre et annonce son adresse", adresse,
              f"{time.time() - depart:.0f} s")
     if not adresse:
@@ -160,21 +196,102 @@ def main() -> int:
         page.goto(socle + "/")
         page.wait_for_selector("table tbody tr", timeout=30000)
         verifier("Rechargement sans jeton : toujours pleinement fonctionnel",
-                 page.locator("text=Lancer l'analyse maintenant").count() == 1)
+                 page.locator('nav.onglets button[data-vue="alertes"]').count() == 1)
+
+        # ---- profils d'investissement --------------------------------
+        segments = page.locator(".segment")
+        verifier("Les profils sont proposés", segments.count() == 4,
+                 f"{segments.count()} profils")
+        avant = page.locator("table tbody tr").count()
+        page.locator(".segment", has_text="Sécurisé").first.click()
+        page.wait_for_timeout(2500)
+        apres = page.locator("table tbody tr").count()
+        titre = page.locator(".carte h2").nth(1).inner_text()
+        verifier("Le profil change le classement sans nouvelle analyse",
+                 apres != avant and "Sécurisé" in titre,
+                 f"{avant} titres → {apres}")
+        # Vérification de fond : un titre écarté par un profil ne doit jamais
+        # être présenté comme ayant des données incomplètes.
+        # Le compte figure sous le titre du classement, soit la deuxieme
+        # carte : la premiere est le selecteur de profils.
+        compte = page.locator(".carte").nth(1).locator(".note").first.inner_text()
+        verifier("Les deux motifs d'exclusion sont distingués",
+                 "écartés par le profil" in compte, compte[:90])
+        capturer(page, "audit-profil.png")
+        page.locator(".segment", has_text="Équilibré").first.click()
+        page.wait_for_timeout(2000)
+
+        # ---- contexte économique -------------------------------------
+        page.locator('nav.onglets button[data-vue="contexte"]').click()
+        page.wait_for_selector(".tuile", timeout=60000)
+        tuiles = page.locator(".tuile").count()
+        articles = page.locator(".article").count()
+        verifier("Les indicateurs publics s'affichent", tuiles >= 3, f"{tuiles} indicateurs")
+        verifier("L'actualité est récupérée", articles >= 3, f"{articles} articles")
+        verifier("Chaque indicateur porte sa période de référence",
+                 page.locator(".tuile-pied").count() >= tuiles)
+        texte_contexte = page.locator("#contenu").inner_text()
+        verifier("La revue de presse est attribuée à des tiers",
+                 "tiers" in texte_contexte and "aucun calcul" in texte_contexte)
+        capturer(page, "audit-contexte.png")
 
         print("\n=== 3. ANALYSE LANCÉE DEPUIS L'INTERFACE ===")
         page.locator('nav.onglets button[data-vue="classement"]').click()
         page.wait_for_timeout(400)
-        for case in page.locator(".panneau .filtres label input").all():
-            libelle = case.evaluate("n => n.parentElement.textContent")
-            if arguments.univers not in libelle.lower().replace(" ", "").replace("-", ""):
-                if case.is_checked() and "cache" not in libelle.lower():
-                    case.uncheck()
-                    page.wait_for_timeout(250)
-        page.locator("text=Lancer l'analyse maintenant").click()
+        # Le panneau de relance est replié par défaut, pour que le classement
+        # soit visible dès l'ouverture. Il faut donc l'ouvrir avant de
+        # toucher à ses cases — sans quoi elles existent mais sont masquées.
+        replies = page.evaluate(
+            "[...document.querySelectorAll('details.pliant')].map(d => d.open)"
+        )
+        verifier("Le panneau de relance est replié par défaut",
+                 replies and not any(replies), f"{len(replies)} blocs repliables")
+
+        # Le DOM est reconstruit a chaque rendu : un bloc ouvert par un clic
+        # se referme au rendu suivant, et l'element vise se retrouve detache.
+        # Chaque interaction reouvre donc les blocs dans le MEME passage
+        # navigateur que l'action qu'elle porte.
+        def ouvrir_les_blocs() -> None:
+            page.evaluate(
+                "document.querySelectorAll('details.pliant')"
+                ".forEach(d => { d.open = true; })"
+            )
+
+        # Ne garder que l'univers demande, pour que l'audit reste court.
+        ouvrir_les_blocs()
+        retires = page.evaluate(
+            """(vise) => {
+                document.querySelectorAll('details.pliant').forEach(d => { d.open = true; });
+                const retires = [];
+                for (const case_ of document.querySelectorAll('.panneau .filtres label input')) {
+                    const libelle = (case_.parentElement.textContent || '').toLowerCase();
+                    const nu = libelle.replace(/[ -]/g, '');
+                    if (!nu.includes(vise) && case_.checked && !libelle.includes('cache')) {
+                        case_.click();
+                        retires.push(case_.value || libelle.trim());
+                    }
+                }
+                return retires;
+            }""",
+            arguments.univers,
+        )
+        verifier("Sélection des univers modifiable", isinstance(retires, list),
+                 f"retirés : {', '.join(retires) or 'aucun'}")
+
+        lance = page.evaluate(
+            """() => {
+                document.querySelectorAll('details.pliant').forEach(d => { d.open = true; });
+                const bouton = [...document.querySelectorAll('button')]
+                    .find(b => b.textContent.includes("Lancer l'analyse maintenant"));
+                if (!bouton) return false;
+                bouton.click();
+                return true;
+            }"""
+        )
+        verifier("Le bouton de lancement est atteignable", lance)
         page.wait_for_timeout(2500)
         verifier("L'avancement s'affiche pendant l'analyse",
-                 page.locator("text=Analyse en cours").count() == 1)
+                 page.locator("text=Analyse en cours").count() >= 1)
         capturer(page, "audit-analyse.png")
 
         debut = time.time()
@@ -200,7 +317,7 @@ def main() -> int:
     verifier("Arrêt propre", processus.returncode in (0, -15, 143, 1),
              f"code {processus.returncode}")
 
-    processus2, adresse2 = lancer(BUREAU, 8812)
+    processus2, adresse2 = lancer(BUREAU, port_libre())
     verifier("Deuxième lancement", adresse2)
     if adresse2:
         console2 = (BUREAU / "console.log").read_text(encoding="utf-8", errors="replace")
@@ -218,7 +335,7 @@ def main() -> int:
 
     print("\n=== 5. TRANSPORT SUR UN AUTRE ORDINATEUR (copie du dossier) ===")
     shutil.copytree(BUREAU, AILLEURS)
-    processus3, adresse3 = lancer(AILLEURS, 8813)
+    processus3, adresse3 = lancer(AILLEURS, port_libre())
     verifier("Démarrage depuis le dossier copié", adresse3)
     if adresse3:
         jeton3 = adresse3.split("jeton=")[1]

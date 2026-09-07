@@ -253,7 +253,7 @@ class MacroClient:
         )
         return Indicateur(
             cle="inflation_zone_euro",
-            label="Inflation zone euro (IPCH, glissement annuel)",
+            label="Inflation, zone euro",
             valeur=obs[-1][1] if obs else None,
             unite="percent",
             periode=obs[-1][0] if obs else "",
@@ -261,7 +261,7 @@ class MacroClient:
             source=f"Eurostat ({geo})" if geo else "Eurostat",
             url="https://ec.europa.eu/eurostat/databrowser/view/prc_hicp_manr/default/table",
             precedent=obs[-2][1] if len(obs) > 1 else None,
-            commentaire="Indice des prix à la consommation harmonisé.",
+            commentaire="Indice des prix à la consommation harmonisé, glissement annuel.",
             fraicheur_jours=60,
         )
 
@@ -272,7 +272,7 @@ class MacroClient:
         )
         return Indicateur(
             cle="croissance_zone_euro",
-            label="Croissance du PIB, zone euro (trimestre sur trimestre)",
+            label="Croissance du PIB, zone euro",
             valeur=obs[-1][1] if obs else None,
             unite="percent",
             periode=obs[-1][0] if obs else "",
@@ -280,7 +280,7 @@ class MacroClient:
             source=f"Eurostat ({geo})" if geo else "Eurostat",
             url="https://ec.europa.eu/eurostat/databrowser/view/namq_10_gdp/default/table",
             precedent=obs[-2][1] if len(obs) > 1 else None,
-            commentaire="Volume, corrigé des variations saisonnières.",
+            commentaire="En volume, d'un trimestre au suivant, corrigé des variations saisonnières.",
             fraicheur_jours=120,
         )
 
@@ -343,7 +343,7 @@ class MacroClient:
                 continue
         return Indicateur(
             cle="taux_us",
-            label="Taux moyen du Trésor américain (obligations)",
+            label="Trésor américain, taux moyen",
             valeur=valeurs[-1][1] if valeurs else None,
             unite="percent",
             periode=valeurs[-1][0] if valeurs else "",

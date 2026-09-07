@@ -99,3 +99,31 @@ def test_lanceur_affiche_l_avertissement():
 def test_pied_de_page_des_alertes():
     assert "conseil en investissement" in disclaimers.ALERT_FOOTER
     assert "incitation" in disclaimers.ALERT_FOOTER
+
+
+def test_actualite_de_presse_toujours_accompagnee_de_son_avertissement():
+    """Les titres de presse releves disent couramment « signal d'achat » ou
+    « action a saisir ». Ils sont relayes tels quels, ce qui est legitime,
+    mais ne doivent jamais pouvoir passer pour une sortie de l'outil : le
+    serveur les livre toujours avec un avertissement d'attribution, et
+    l'interface l'affiche."""
+    from investassist.serveur import CONTEXTE_AVERTISSEMENT, PRESSE_AVERTISSEMENT
+
+    assert "tiers" in PRESSE_AVERTISSEMENT
+    assert "aucun calcul" in PRESSE_AVERTISSEMENT
+    assert "ni un signal" in CONTEXTE_AVERTISSEMENT
+
+    script = (ROOT / "web" / "assets" / "app.js").read_text(encoding="utf-8")
+    # La liste de presse est rendue avec l'avertissement fourni par l'API,
+    # jamais avec un texte ecrit en dur dans l'interface.
+    assert "avertissement_presse" in script
+
+
+def test_l_actualite_n_entre_dans_aucun_calcul():
+    """Garantie structurelle : le moteur de notation ne doit importer ni le
+    lecteur d'actualite ni le fournisseur macro. Un score ne se calcule que
+    sur des comptes publies."""
+    for module in ("scoring.py", "criteria.py", "screener.py", "fundamentals.py"):
+        source = (ROOT / "src" / "investassist" / module).read_text(encoding="utf-8")
+        assert "actualite" not in source, f"{module} importe le lecteur d'actualité"
+        assert "macro" not in source, f"{module} importe le fournisseur macro"

@@ -32,6 +32,7 @@ from .alerts.rules import attach_earnings_dates
 from .chemins import dossier_donnees, dossier_site, resume as resume_chemins
 from .config import ScoringConfig, Settings, load_profils, load_universes
 from .fundamentals import FundamentalsService
+from .models import CriterionResult, PillarResult, StockScore
 from .providers.actualite import ActualiteClient
 from .providers.macro import MacroClient
 from .screener import Screener, tickers_for
@@ -243,12 +244,19 @@ class Application:
             return None
 
         derniere = self.db.last_run()
-        if derniere is None:
-            return None
-        scores = [
-            score_from_row(dict(ligne))
-            for ligne in self.db.scores_for_run(int(derniere["id"]))
-        ]
+        scores: list[StockScore] = []
+        if derniere is not None:
+            scores = [
+                score_from_row(dict(ligne))
+                for ligne in self.db.scores_for_run(int(derniere["id"]))
+            ]
+        if not scores:
+            # Premiere ouverture : la base est vide, mais l'application est
+            # livree avec un instantane de classement. Sans ce repli, le
+            # selecteur de profils s'affichait et ne produisait rien tant
+            # qu'aucune analyse n'avait tourne — une commande visible et
+            # inerte, pire qu'une commande absente.
+            scores = self._scores_depuis_instantane()
         if not scores:
             return None
 
@@ -271,6 +279,64 @@ class Application:
             "par_defaut": profil.par_defaut,
         }
         return charge
+
+    def _scores_depuis_instantane(self) -> list[StockScore]:
+        """Reconstitue les titres a partir du fichier de classement publie.
+
+        Le fichier contient tout ce dont un profil a besoin : valeur et
+        sous-score de chaque critere, son poids, et le fait qu'il soit sans
+        objet. Aucune donnee n'est recalculee, rien n'est telecharge.
+        """
+        classement = export.read_json(self.fichier_donnees("ranking.json")) or {}
+        entrees = list(classement.get("ranked") or []) + list(classement.get("excluded") or [])
+        scores: list[StockScore] = []
+        for entree in entrees:
+            piliers: dict[str, PillarResult] = {}
+            for cle, bloc in (entree.get("pillars") or {}).items():
+                criteres = [
+                    CriterionResult(
+                        key=c.get("key", ""),
+                        label=c.get("label", ""),
+                        unit=c.get("unit", "ratio"),
+                        value=c.get("value"),
+                        score=c.get("score"),
+                        weight=float(c.get("weight") or 0.0),
+                        pillar=cle,
+                        detail=c.get("detail", ""),
+                        reason_missing=c.get("reason_missing", ""),
+                        not_applicable=bool(c.get("not_applicable")),
+                    )
+                    for c in (bloc.get("criteria") or [])
+                ]
+                piliers[cle] = PillarResult(
+                    key=cle,
+                    weight=float(bloc.get("weight") or 0.0),
+                    score=bloc.get("score"),
+                    coverage=float(bloc.get("coverage") or 0.0),
+                    criteria=criteres,
+                    neutralized=bool(bloc.get("neutralized")),
+                )
+            scores.append(
+                StockScore(
+                    ticker=entree.get("ticker", ""),
+                    name=entree.get("name"),
+                    sector=entree.get("sector"),
+                    region=entree.get("region"),
+                    country=entree.get("country"),
+                    currency=entree.get("currency"),
+                    price=entree.get("price"),
+                    composite=entree.get("composite"),
+                    sector_rank=entree.get("sector_rank"),
+                    sector_count=entree.get("sector_count"),
+                    pillars=piliers,
+                    window_years=int(entree.get("window_years") or 0),
+                    coverage=float(entree.get("coverage") or 0.0),
+                    ranked=bool(entree.get("ranked")),
+                    exclusion_reason=entree.get("exclusion_reason") or "",
+                    warnings=list(entree.get("warnings") or []),
+                )
+            )
+        return scores
 
     def profils_disponibles(self) -> dict[str, Any]:
         profils = load_profils()

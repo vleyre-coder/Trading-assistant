@@ -325,6 +325,83 @@ L'application applique par ailleurs une **fenêtre adaptative** et l'affiche :
 Le badge reste là pour rappeler, à chaque lecture, sur combien d'exercices le
 score a réellement été calculé.
 
+## Choisir le type de société recherchée
+
+Quatre profils sélectionnables en tête du classement. Un profil ne change
+**aucune donnée** et n'ajoute aucun critère : il change leur pondération, donc
+la question posée. Le basculement repart des sous-scores déjà enregistrés —
+instantané, et sans aucun appel réseau.
+
+| Profil | Ce qu'il privilégie | Effet mesuré (CAC 40 + Nasdaq-100) |
+|---|---|---|
+| **Équilibré** | rien — la pondération d'origine | 142 classés, référence |
+| **Croissance** | croissance 45 %, dividende ignoré | 19 titres du top 20 en commun avec la référence |
+| **Fort potentiel** | croissance 53 %, petites capitalisations avantagées | 13/20 en commun |
+| **Sécurisé** | bilan 25 %, régularité et risque 18 % | 83 classés, 59 écartés, 7/20 en commun |
+
+**Ce qui a rendu ces profils utilisables.** La première version ne servait à
+rien : les quatre donnaient presque le même classement, PDD arrivant premier
+partout, « Sécurisé » compris. La cause n'était pas la pondération mais une
+lacune du modèle — **rien ne mesurait le risque**. Une société excellente sur
+tous les piliers gagne sous n'importe quelle pondération, ce qui est exact mais
+ne répond pas à la question « qu'est-ce qui bouge peu ».
+
+D'où un pilier **régularité et risque** : volatilité annualisée du cours, part
+d'exercices bénéficiaires, régularité de la marge, capitalisation. Il porte un
+poids **nul** par défaut — la pondération d'origine est donc strictement
+inchangée, ce qu'un test vérifie — et n'est calculé que pour être disponible
+aux profils. Avec lui, « Sécurisé » fait remonter Hermès, Alphabet et Dassault
+Systèmes, tous autour de 30 % de volatilité, et écarte PDD à 58 %.
+
+Une exigence de profil écarte avec un motif qui dit **« ne correspond pas au
+profil »**, jamais « données incomplètes » : le titre est parfaitement mesuré,
+il ne correspond simplement pas à la recherche. Les deux comptes sont affichés
+séparément.
+
+Réglages dans `config/profils.yaml` : `pillar_weights`, `criteria_weights`,
+`criteria_inverted` (retourne le sens d'un critère) et `exigences` (seuils
+éliminatoires). Rien n'est codé en dur.
+
+## Contexte économique et actualité
+
+Onglet **Contexte** : six indicateurs publics, tous sans clé d'API.
+
+| Indicateur | Source |
+|---|---|
+| Taux directeur, courbe 10 ans zone euro | Banque centrale européenne |
+| Inflation, croissance du PIB, chômage | Eurostat |
+| Coût moyen de la dette américaine | Trésor américain |
+
+Chaque valeur porte sa **période de référence**, sa **date de publication** et
+un lien vers la source, et se déclare **périmée** au-delà d'un délai propre à sa
+fréquence. Ce n'est pas théorique : l'inflation de la zone euro remonte
+décembre 2025, publiée en février 2026. La lire comme l'état actuel serait faux,
+l'omettre serait pire.
+
+Le code de la zone euro n'est pas codé en dur — les séries observées utilisent
+`EA`, `EA20` et `EA21` selon le jeu de données, et ces codes se décalent à
+chaque élargissement. Chaque série essaie une chaîne de codes : un code non
+reconnu renvoie une réponse valide mais **vide**, indistinguable d'une absence
+de donnée.
+
+Deux natures d'actualité, séparées et jamais mélangées :
+
+- **Communiqués des banques centrales** (BCE, Réserve fédérale) — des faits
+  publiés par ceux qui les décident ;
+- **Revue de presse** — des publications de tiers, relayées telles quelles avec
+  leur source et leur date. Elles ne sont ni vérifiées, ni reprises, ni
+  approuvées, et **n'entrent dans aucun calcul**.
+
+Cette séparation n'est pas cosmétique. Les titres relevés disent couramment
+« signal d'achat » ou « action à saisir », et une telle formulation ne doit
+jamais pouvoir être lue comme une sortie de cet outil. Un test vérifie que le
+moteur de notation n'importe ni le lecteur d'actualité ni le fournisseur macro :
+un score ne se calcule que sur des comptes publiés.
+
+**Ce que cet onglet ne fait pas.** Il n'indique pas vers quoi diriger un
+investissement. L'outil affiche des chiffres publiés ; il ne sait pas ce qu'un
+taux directeur implique pour un titre donné, et ne le prétend pas.
+
 ## Méthodologie de scoring
 
 Score composite = moyenne pondérée de 5 piliers. **Aucun poids n'est codé en

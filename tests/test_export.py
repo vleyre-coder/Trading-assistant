@@ -53,7 +53,9 @@ def test_structure_du_classement():
         {"DDD": "aucune donnée récupérée"}, CONFIG,
         universes=["cac40"], generated_at=datetime(2026, 8, 25, 21, 0), duration_seconds=487.3,
     )
-    assert charge["counts"] == {"ranked": 2, "excluded": 1, "failed": 1}
+    assert charge["counts"] == {
+        "ranked": 2, "excluded": 1, "hors_profil": 0, "failed": 1,
+    }
     assert charge["generated_at"] == "2026-08-25T21:00:00"
     assert charge["duration_seconds"] == 487.3
     assert [t["rank"] for t in charge["ranked"]] == [1, 2]
@@ -204,3 +206,22 @@ def test_configuration_d_alertes_du_depot_valide():
 
     for regle in regles:
         assert regle["kind"] in ALERT_KINDS, f"type d'alerte inconnu : {regle['kind']}"
+
+
+def test_les_deux_motifs_d_exclusion_sont_comptes_separement():
+    """Un titre ecarte par un profil est parfaitement mesure : le compter
+    parmi les « donnees incompletes » serait faux et ferait douter de la
+    source."""
+    incomplet = score("CCC", None, ranked=False)
+    incomplet.exclusion_reason = "Données fondamentales incomplètes — couverture 48 %"
+    hors_profil = score("DDD", 55.0, ranked=False)
+    hors_profil.exclusion_reason = (
+        "Ne correspond pas au profil « Sécurisé » — volatilité annualisée de 58 %"
+    )
+
+    charge = export.ranking_payload(
+        [score("AAA", 82.0)], [incomplet, hors_profil], {}, CONFIG,
+        universes=["cac40"], generated_at=datetime(2026, 9, 3, 8, 0), duration_seconds=1.0,
+    )
+    assert charge["counts"]["excluded"] == 1
+    assert charge["counts"]["hors_profil"] == 1

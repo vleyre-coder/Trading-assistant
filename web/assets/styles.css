@@ -34,10 +34,18 @@
   --serious:        #ec835a;
   --critical:       #d03b3b;
 
-  /* Rythme */
+  /* Rythme. Echelle de graduation unique : les tailles de police et les
+     espacements se prennent ici, jamais en valeurs libres, sinon la page
+     derive vers une vingtaine de tailles legerement differentes. */
+  --t-micro: 0.69rem;   /* etiquettes en capitales */
+  --t-petit: 0.8rem;
+  --t-base:  0.9rem;
+  --t-titre: 1.05rem;
+  --t-grand: 1.75rem;   /* chiffre d'une tuile */
+  --t-hero:  2.6rem;    /* chiffre principal d'une fiche */
   --r-sm: 8px;
   --r-md: 12px;
-  --r-lg: 16px;
+  --r-lg: 18px;
   --ombre-1: 0 1px 2px rgba(16, 16, 12, 0.04);
   --ombre-2: 0 4px 16px rgba(16, 16, 12, 0.07);
   --largeur: 1320px;
@@ -203,16 +211,19 @@ main.enveloppe { padding-top: 24px; padding-bottom: 56px; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: var(--ombre-1);
-  padding: 22px;
-  margin-bottom: 20px;
+  /* Aucune ombre : les plans se distinguent par leur teinte et le vide qui
+     les separe. Une ombre portee sur fond sombre ne se voit pas et alourdit
+     le rendu sur fond clair. */
+  padding: 24px 26px;
+  margin-bottom: 18px;
 }
 .carte-entete {
   display: flex; align-items: flex-start; gap: 16px;
   flex-wrap: wrap; margin-bottom: 4px;
 }
 .carte h2 {
-  font-size: 1.12rem; font-weight: 650; margin: 0 0 3px; letter-spacing: -0.012em;
+  font-size: var(--t-titre); font-weight: 660; margin: 0 0 3px;
+  letter-spacing: -0.016em;
 }
 .carte h3 {
   font-size: 0.72rem; font-weight: 650; margin: 26px 0 12px;
@@ -242,8 +253,9 @@ main.enveloppe { padding-top: 24px; padding-bottom: 56px; }
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .indicateur .valeur {
-  font-size: 1.6rem; font-weight: 640; letter-spacing: -0.03em;
-  line-height: 1.2; margin-top: 3px;
+  font-size: var(--t-grand); font-weight: 630; letter-spacing: -0.035em;
+  line-height: 1.15; margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 .indicateur.accent { background: var(--series-voile); border-color: transparent; }
 .indicateur.accent .valeur { color: var(--series-fonce); }
@@ -281,11 +293,11 @@ main.enveloppe { padding-top: 24px; padding-bottom: 56px; }
 table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 0.855rem; }
 
 thead th {
-  text-align: left; padding: 10px 12px; white-space: nowrap;
-  background: var(--surface-alt);
-  border-bottom: 1px solid var(--border);
-  color: var(--ink-muted); font-weight: 650; font-size: 0.68rem;
-  text-transform: uppercase; letter-spacing: 0.06em;
+  text-align: left; padding: 11px 12px; white-space: nowrap;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-fort);
+  color: var(--ink-muted); font-weight: 650; font-size: var(--t-micro);
+  text-transform: uppercase; letter-spacing: 0.07em;
   position: sticky; top: 0; z-index: 1; cursor: pointer; user-select: none;
 }
 thead th:hover:not(.non-triable) { color: var(--ink); }
@@ -297,9 +309,12 @@ thead th .fleche { color: var(--series); margin-left: 4px; font-size: 0.85em; }
    quand toutes les lignes ont le meme gabarit. Les noms trop longs sont
    tronques visuellement, l'intitule complet restant dans l'infobulle. */
 tbody td {
-  padding: 9px 12px; border-bottom: 1px solid var(--grid); vertical-align: middle;
+  padding: 12px; border-bottom: 1px solid var(--grid); vertical-align: middle;
   white-space: nowrap;
 }
+/* Tous les chiffres du tableau en chasse fixe : les colonnes s'alignent a
+   l'oeil, ce qui est le point d'un tableau de valeurs. */
+tbody td.num, thead th.num { font-variant-numeric: tabular-nums; }
 tbody td.nom {
   max-width: 230px; overflow: hidden; text-overflow: ellipsis;
 }
@@ -549,4 +564,168 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
     animation: none !important;
   }
   .chargement-piste::after { width: 100%; opacity: 0.5; }
+}
+
+/* =====================================================================
+   Sélecteur de profil
+   ---------------------------------------------------------------------
+   Commande segmentée : quatre questions possibles posées aux mêmes
+   données. Elle est placée AVANT le classement parce qu'elle en change
+   la lecture — la reléguer dans un menu ferait croire à un réglage
+   secondaire.
+   ===================================================================== */
+.profils { padding-bottom: 20px; }
+.profils-entete { margin-bottom: 14px; }
+.profils-titre {
+  font-size: var(--t-titre); font-weight: 660; margin: 0;
+  letter-spacing: -0.016em;
+}
+
+.segments {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.segment {
+  font: inherit; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 13px 15px; border-radius: var(--r-md);
+  border: 1px solid var(--border-fort);
+  background: var(--surface); color: var(--ink-secondary);
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.segment:hover:not(:disabled) { border-color: var(--baseline); color: var(--ink); }
+.segment:disabled { opacity: 0.55; cursor: progress; }
+.segment-label { font-size: var(--t-base); font-weight: 640; letter-spacing: -0.01em; }
+.segment-resume { font-size: var(--t-petit); color: var(--ink-muted); line-height: 1.4; }
+
+/* Le profil actif est signalé par la teinte ET par le trait de gauche :
+   la couleur seule ne doit jamais porter une information. */
+.segment.actif {
+  background: var(--series-voile);
+  border-color: var(--series);
+  color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--series);
+}
+.segment.actif .segment-label { color: var(--series-fonce); }
+
+.profils-description {
+  margin: 14px 0 0; font-size: var(--t-base); color: var(--ink-secondary);
+  max-width: 78ch; white-space: pre-line;
+}
+.profils-note { margin-top: 10px; max-width: 78ch; }
+
+/* =====================================================================
+   Tuiles d'indicateur macroéconomique
+   ===================================================================== */
+.tuiles {
+  display: grid; gap: 12px; margin-top: 18px;
+  /* Colonnes larges : avec six indicateurs, une grille etroite produisait
+     une rangee de cinq suivie d'une tuile seule. Trois par trois se lit
+     mieux et laisse la place aux libelles sans les couper. */
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  /* Chaque tuile s'arrete a son contenu. Etirees a la hauteur de la plus
+     haute, celles qui portent un avertissement creusaient un vide de
+     plusieurs centimetres sous les autres. */
+  align-items: start;
+}
+.tuile {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 16px 17px; border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+.tuile-label {
+  font-size: var(--t-micro); font-weight: 650; color: var(--ink-muted);
+  text-transform: uppercase; letter-spacing: 0.06em; line-height: 1.35;
+}
+.tuile-valeur { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.tuile-chiffre {
+  font-size: var(--t-grand); font-weight: 630; letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+/* Une variation de taux n'est ni bonne ni mauvaise : pas de vert ni de
+   rouge ici, seulement le signe et l'ampleur. */
+.tuile-variation {
+  font-size: var(--t-petit); color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.tuile-pied {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  font-size: var(--t-petit); color: var(--ink-muted);
+}
+/* Periode et source alignees a gauche, separees par l'espacement seul :
+   pousser la source a droite produisait un escalier d'une tuile a l'autre,
+   et un separateur en caractere se retrouvait en tete de ligne apres un
+   retour a la ligne, ou il ressemblait a une puce. */
+.tuile-pied > span { white-space: nowrap; }
+.tuile-note {
+  margin: 2px 0 0; font-size: var(--t-petit); color: var(--ink-secondary);
+  line-height: 1.45;
+}
+.tuile-lien {
+  font-size: var(--t-petit); color: var(--series); text-decoration: none;
+  align-self: flex-start; margin-top: 2px;
+}
+.tuile-lien:hover { text-decoration: underline; }
+
+/* Indicateur dont la dernière publication est trop ancienne pour décrire
+   la situation actuelle. Le liseré est doublé d'un texte explicite : la
+   couleur ne porte jamais seule l'avertissement. */
+.tuile-perimee { border-left: 3px solid var(--warning); }
+.tuile-perimee .tuile-chiffre { color: var(--ink-secondary); }
+.tuile-avertissement { color: var(--ink); font-weight: 500; }
+
+/* =====================================================================
+   Listes d'actualité
+   ===================================================================== */
+.articles { list-style: none; margin: 16px 0 0; padding: 0; }
+.article {
+  padding: 13px 0; border-bottom: 1px solid var(--grid);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.article:last-child { border-bottom: none; }
+.article:first-child { padding-top: 0; }
+.article-titre {
+  color: var(--ink); text-decoration: none;
+  font-size: var(--t-base); font-weight: 560; line-height: 1.45;
+  letter-spacing: -0.008em;
+}
+.article-titre:hover { color: var(--series); text-decoration: underline; }
+.article-meta {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  font-size: var(--t-petit); color: var(--ink-muted);
+}
+
+@media (max-width: 620px) {
+  .segments { grid-template-columns: 1fr; }
+  .tuiles { grid-template-columns: 1fr; }
+  .carte { padding: 18px 16px; }
+}
+
+/* =====================================================================
+   Blocs repliables
+   ---------------------------------------------------------------------
+   Le classement doit être visible dès l'ouverture. Ce qui se consulte
+   occasionnellement — relancer une analyse, lire la définition d'un
+   profil — se replie derrière une ligne, au lieu d'occuper un écran.
+   ===================================================================== */
+.pliant > summary {
+  cursor: pointer; list-style: none;
+  font-size: var(--t-base); font-weight: 600; color: var(--ink-secondary);
+  padding: 4px 0; display: flex; align-items: center; gap: 8px;
+  letter-spacing: -0.008em;
+}
+.pliant > summary::-webkit-details-marker { display: none; }
+.pliant > summary::before {
+  content: ""; width: 6px; height: 6px; flex: none;
+  border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg); transition: transform 0.15s;
+}
+.pliant[open] > summary::before { transform: rotate(45deg); }
+.pliant > summary:hover { color: var(--ink); }
+.pliant[open] > summary { margin-bottom: 12px; }
+.pliant-profil { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pliant > summary::before { transition: none; }
 }

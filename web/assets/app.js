@@ -21,6 +21,13 @@
     donnees: null,
     historique: null,
     vue: "classement",
+    // Profil d'investissement retenu, et catalogue des profils disponibles.
+    // Le profil ne change aucune donnee : il change la ponderation, donc la
+    // question posee au classement.
+    profil: null,
+    profils: null,
+    contexte: null,
+    chargementProfil: false,
     selection: null,
     tri: { colonne: "rank", ordre: 1 },
     filtres: { recherche: "", zone: "", secteur: "" },
@@ -34,6 +41,10 @@
     if (texte !== undefined) noeud.textContent = texte;
     return noeud;
   };
+
+  /** « 1 écarté » et non « 1 écartés » : la faute d'accord saute aux yeux
+      et donne l'impression d'un texte produit sans relecture. */
+  const accord = (n, singulier, pluriel) => `${n} ${n === 1 ? singulier : pluriel}`;
 
   const nombre = (valeur, decimales = 1) =>
     valeur === null || valeur === undefined || Number.isNaN(valeur)
@@ -244,6 +255,13 @@
       etat.appli = await api("/api/etat");
       etat.watchlist = (await api("/api/watchlist")).titres.map((t) => t.ticker);
       activerOngletAlertes();
+      activerOngletContexte();
+      try {
+        etat.profils = await api("/api/profils");
+        if (!etat.profil) etat.profil = profilMemorise() || etat.profils.defaut;
+      } catch (erreur) {
+        etat.profils = null;   // profils indisponibles : classement de référence
+      }
       afficherChargement("Lecture du dernier classement…");
     } catch (erreur) {
       etat.appli = null;
@@ -267,6 +285,11 @@
       appliquerAvertissements(classement.disclaimer || {});
       majHorodatage(classement.generated_at);
       rendre();
+      // Le classement de reference s'affiche d'abord : l'utilisateur voit
+      // quelque chose immediatement, puis la vue se cale sur son profil.
+      if (etat.profils && etat.profil && etat.profil !== etat.profils.defaut) {
+        appliquerProfil(etat.profil);
+      }
     } catch (erreur) {
       $("#contenu").innerHTML = "";
       const carte = creer("section", "carte");
@@ -315,9 +338,264 @@
       alertes: vueAlertes,
       watchlist: vueWatchlist,
       exclus: vueExclus,
+      contexte: vueContexte,
       methodologie: vueMethodologie,
     };
     (vues[etat.vue] || vueClassement)(contenu);
+  }
+
+
+  /* ================================================================ profils
+     Un profil ne recalcule aucun critere : il repondere ceux deja mesures.
+     Le basculement est donc instantane et fonctionne hors connexion. */
+
+  const CLE_PROFIL = "investassist.profil";
+
+  function profilMemorise() {
+    try {
+      return localStorage.getItem(CLE_PROFIL) || null;
+    } catch (erreur) {
+      return null;
+    }
+  }
+
+  function memoriserProfil(cle) {
+    try {
+      localStorage.setItem(CLE_PROFIL, cle);
+    } catch (erreur) {
+      /* stockage refusé : le choix vaut pour la session */
+    }
+  }
+
+  async function appliquerProfil(cle) {
+    if (!etat.profils) return;
+    etat.chargementProfil = true;
+    rendre();
+    try {
+      const charge = await api(`/api/classement?profil=${encodeURIComponent(cle)}`);
+      etat.donnees = charge;
+      etat.profil = cle;
+      memoriserProfil(cle);
+      // La sélection courante peut avoir disparu du classement sous ce
+      // profil : la conserver afficherait une fiche sans rang cohérent.
+      if (etat.selection && !(charge.ranked || []).some((t) => t.ticker === etat.selection)) {
+        const ecarte = (charge.excluded || []).find((t) => t.ticker === etat.selection);
+        if (!ecarte) etat.selection = null;
+      }
+    } catch (erreur) {
+      etat.erreurProfil = erreur.message;
+    } finally {
+      etat.chargementProfil = false;
+      rendre();
+    }
+  }
+
+  /** Sélecteur segmenté : quel type de société cherchez-vous ? */
+  function selecteurProfil() {
+    if (!etat.profils || (etat.profils.profils || []).length < 2) return null;
+    const actuel =
+      (etat.donnees && etat.donnees.profil && etat.donnees.profil.cle) ||
+      etat.profil ||
+      etat.profils.defaut;
+
+    const bloc = creer("section", "carte profils");
+    const entete = creer("div", "profils-entete");
+    entete.append(creer("h2", "profils-titre", "Quel type de société cherchez-vous ?"));
+    bloc.append(entete);
+
+    const segments = creer("div", "segments");
+    segments.setAttribute("role", "radiogroup");
+    segments.setAttribute("aria-label", "Profil d'investissement");
+    etat.profils.profils.forEach((profil) => {
+      const choix = creer("button", "segment" + (profil.cle === actuel ? " actif" : ""));
+      choix.type = "button";
+      choix.setAttribute("role", "radio");
+      choix.setAttribute("aria-checked", String(profil.cle === actuel));
+      choix.disabled = etat.chargementProfil;
+      choix.append(creer("span", "segment-label", profil.label));
+      choix.append(creer("span", "segment-resume", profil.resume));
+      choix.addEventListener("click", () => {
+        if (profil.cle !== actuel) appliquerProfil(profil.cle);
+      });
+      segments.append(choix);
+    });
+    bloc.append(segments);
+
+    // Le rappel court est toujours visible — sans lui, le lecteur croit à
+    // une nouvelle analyse quand le classement bouge. Le détail complet du
+    // profil reste à un clic : le déplier d'office repoussait le tableau
+    // sous la ligne de flottaison.
+    bloc.append(
+      creer(
+        "p",
+        "note profils-note",
+        "Même analyse, autre pondération : changer de profil ne recalcule rien " +
+          "et ne récupère aucune donnée."
+      )
+    );
+    const courant = etat.profils.profils.find((p) => p.cle === actuel);
+    if (courant && courant.description) {
+      const pliant = creer("details", "pliant pliant-profil");
+      pliant.append(creer("summary", null, `Ce que mesure le profil « ${courant.label} »`));
+      pliant.append(creer("p", "profils-description", courant.description));
+      pliant.append(
+        creer(
+          "p",
+          "note",
+          "Un titre premier sous un profil et cinquantième sous un autre n'est " +
+            "ni bon ni mauvais : il répond bien à une question et mal à une autre."
+        )
+      );
+      bloc.append(pliant);
+    }
+    if (etat.erreurProfil) {
+      bloc.append(creer("p", "note alerte", `Profil indisponible : ${etat.erreurProfil}`));
+    }
+    return bloc;
+  }
+
+  /* =============================================================== contexte */
+  function activerOngletContexte() {
+    if (document.querySelector('nav.onglets button[data-vue="contexte"]')) return;
+    const nav = document.querySelector("nav.onglets");
+    const bouton = creer("button", null, "Contexte");
+    bouton.setAttribute("role", "tab");
+    bouton.dataset.vue = "contexte";
+    bouton.setAttribute("aria-selected", "false");
+    bouton.addEventListener("click", () => {
+      etat.vue = "contexte";
+      rendre();
+      if (!etat.contexte) chargerContexte();
+    });
+    const methodologie = document.querySelector('nav.onglets button[data-vue="methodologie"]');
+    nav.insertBefore(bouton, methodologie);
+  }
+
+  async function chargerContexte() {
+    try {
+      etat.contexte = await api("/api/contexte");
+    } catch (erreur) {
+      etat.contexte = { erreur: erreur.message };
+    }
+    if (etat.vue === "contexte") rendre();
+  }
+
+  /** Tuile d'indicateur : la valeur d'abord, sa lecture ensuite. */
+  function tuileIndicateur(indicateur) {
+    const tuile = creer("article", "tuile" + (indicateur.perime ? " tuile-perimee" : ""));
+    tuile.append(creer("div", "tuile-label", indicateur.label));
+
+    const valeur = creer("div", "tuile-valeur");
+    const brut =
+      indicateur.unite === "percent"
+        ? `${nombre(indicateur.valeur, 2)} %`
+        : nombre(indicateur.valeur, 2);
+    valeur.append(creer("span", "tuile-chiffre", brut));
+    if (indicateur.variation !== null && indicateur.variation !== undefined) {
+      const signe = indicateur.variation > 0 ? "+" : "";
+      // Une variation de taux n'est ni bonne ni mauvaise : pas de couleur de
+      // statut ici, seulement le signe et l'ampleur.
+      valeur.append(
+        creer("span", "tuile-variation", `${signe}${nombre(indicateur.variation, 2)} pt`)
+      );
+    }
+    tuile.append(valeur);
+
+    const pied = creer("div", "tuile-pied");
+    if (indicateur.periode) pied.append(creer("span", null, `Période ${indicateur.periode}`));
+    if (indicateur.source) pied.append(creer("span", "tuile-source", indicateur.source));
+    tuile.append(pied);
+
+    if (indicateur.commentaire) {
+      tuile.append(creer("p", "tuile-note", indicateur.commentaire));
+    }
+    if (indicateur.perime) {
+      tuile.append(
+        creer(
+          "p",
+          "tuile-note tuile-avertissement",
+          `Dernière publication le ${(indicateur.publie_le || "").slice(0, 10)} : ` +
+            "cette valeur est trop ancienne pour décrire la situation actuelle."
+        )
+      );
+    }
+    if (indicateur.url) {
+      const lien = creer("a", "tuile-lien", "Source");
+      lien.href = indicateur.url;
+      lien.target = "_blank";
+      lien.rel = "noopener noreferrer";
+      tuile.append(lien);
+    }
+    return tuile;
+  }
+
+  function listeArticles(articles, titre, avertissement) {
+    const bloc = creer("section", "carte");
+    bloc.append(creer("h2", null, titre));
+    if (avertissement) bloc.append(creer("p", "note", avertissement));
+    if (!articles || !articles.length) {
+      bloc.append(creer("p", "note indisponible", "Aucun élément récupéré pour le moment."));
+      return bloc;
+    }
+    const liste = creer("ul", "articles");
+    articles.forEach((article) => {
+      const ligne = creer("li", "article");
+      const lien = creer("a", "article-titre", article.titre);
+      if (article.lien) {
+        lien.href = article.lien;
+        lien.target = "_blank";
+        lien.rel = "noopener noreferrer";
+      }
+      ligne.append(lien);
+      const meta = creer("div", "article-meta");
+      meta.append(creer("span", null, article.source));
+      if (article.publie_le) {
+        meta.append(creer("span", null, delaiLisible(article.publie_le)));
+      }
+      ligne.append(meta);
+      liste.append(ligne);
+    });
+    bloc.append(liste);
+    return bloc;
+  }
+
+  function vueContexte(racine) {
+    const contexte = etat.contexte;
+    if (!contexte) {
+      racine.append(ecranChargement("Relevé des indicateurs publics…"));
+      return;
+    }
+    if (contexte.erreur) {
+      const carte = creer("section", "carte");
+      carte.append(creer("h2", null, "Contexte indisponible"));
+      carte.append(creer("p", "note", contexte.erreur));
+      racine.append(carte);
+      return;
+    }
+
+    const tete = creer("section", "carte");
+    tete.append(creer("h2", null, "Contexte économique"));
+    tete.append(creer("p", "note", contexte.avertissement || ""));
+    const grille = creer("div", "tuiles");
+    (contexte.indicateurs || []).forEach((i) => grille.append(tuileIndicateur(i)));
+    if (!(contexte.indicateurs || []).length) {
+      grille.append(
+        creer("p", "note indisponible", "Aucun indicateur n'a pu être récupéré.")
+      );
+    }
+    tete.append(grille);
+    racine.append(tete);
+
+    racine.append(
+      listeArticles(
+        contexte.institutionnel,
+        "Communiqués des banques centrales",
+        "Publications officielles de la BCE et de la Réserve fédérale."
+      )
+    );
+    racine.append(
+      listeArticles(contexte.presse, "Revue de presse", contexte.avertissement_presse)
+    );
   }
 
   /* ---------------------------------------------------- barre d'analyse */
@@ -496,18 +774,42 @@
       racine.append(alerte);
     }
 
+    const choix = selecteurProfil();
+    if (choix) racine.append(choix);
+
     const carte = creer("section", "carte");
 
     const entete = creer("div", "carte-entete");
     const titres = creer("div");
-    titres.append(creer("h2", null, "Classement par adéquation aux critères fondamentaux"));
+    const profilActif =
+      etat.donnees && etat.donnees.profil && !etat.donnees.profil.par_defaut
+        ? ` · profil « ${etat.donnees.profil.label} »`
+        : "";
+    titres.append(
+      creer("h2", null, `Classement par adéquation aux critères fondamentaux${profilActif}`)
+    );
     titres.append(
       creer(
         "p",
         "note",
-        `Univers : ${(donnees.universes || []).join(", ")} · ` +
-          `${donnees.counts.ranked} titres classés · ${donnees.counts.excluded} écartés pour ` +
-          `données incomplètes · ${donnees.counts.failed} non récupérés`
+        [
+          `Univers : ${(donnees.universes || []).join(", ")}`,
+          accord(donnees.counts.ranked, "titre classé", "titres classés"),
+          // « écartés par le profil » et « données incomplètes » sont deux
+          // choses distinctes : les premiers sont parfaitement mesurés, ils
+          // ne correspondent simplement pas à ce qui est recherché.
+          donnees.counts.hors_profil
+            ? accord(donnees.counts.hors_profil, "écarté par le profil", "écartés par le profil")
+            : null,
+          accord(
+            donnees.counts.excluded,
+            "écarté pour données incomplètes",
+            "écartés pour données incomplètes"
+          ),
+          accord(donnees.counts.failed, "non récupéré", "non récupérés"),
+        ]
+          .filter(Boolean)
+          .join(" · ")
       )
     );
     entete.append(titres);
@@ -523,7 +825,11 @@
     }
     indicateurs.append(
       indicateur(String(donnees.counts.ranked), "Titres classés"),
-      indicateur(String(donnees.counts.excluded), "Données incomplètes"),
+      // Sous un profil, l'exclusion la plus nombreuse est celle du profil
+      // lui-meme : c'est elle qui doit s'afficher, avec son vrai motif.
+      donnees.counts.hors_profil
+        ? indicateur(String(donnees.counts.hors_profil), "Écartés par le profil")
+        : indicateur(String(donnees.counts.excluded), "Données incomplètes"),
       indicateur(`${donnees.methodology.target_years} ans`, "Fenêtre visée")
     );
     carte.append(indicateurs);
@@ -542,11 +848,25 @@
     racine.append(carte);
 
     if (etat.appli) {
+      // Repliee par defaut : on relance une analyse de temps en temps, on
+      // consulte le classement a chaque ouverture. Deplie d'office, ce
+      // panneau poussait le tableau sous la ligne de flottaison. Il
+      // s'ouvre de lui-meme pendant une analyse, pour montrer l'avancement.
+      const enCours = (etat.analyse || {}).en_cours;
       const commande = creer("section", "carte");
-      commande.append(barreAnalyse());
+      const pliant = creer("details", "pliant");
+      pliant.open = Boolean(enCours);
+      // Intitule constant : le panneau s'ouvre de lui-meme pendant une
+      // analyse, et son contenu annonce deja « Analyse en cours ». Le
+      // repeter dans le resume placait deux fois la meme phrase a deux
+      // lignes d'intervalle.
+      const resume_titre = creer("summary", null, "Relancer l'analyse");
+      pliant.append(resume_titre);
+      pliant.append(barreAnalyse());
+      commande.append(pliant);
       const resume = (etat.analyse || {}).resume;
       if (resume) {
-        commande.append(
+        pliant.append(
           creer(
             "p",
             "note",
@@ -1278,12 +1598,21 @@
 
     const carte = creer("section", "carte");
     carte.append(creer("h2", null, "Titres non classés"));
+    // Deux motifs radicalement differents dans la meme liste : les
+    // presenter sous un seul intitule ferait passer des titres bien mesures
+    // pour des titres mal renseignes.
+    const horsProfil = (donnees.counts && donnees.counts.hors_profil) || 0;
     carte.append(
       creer(
         "p",
         "note",
-        "Ces titres sont écartés du classement plutôt que notés sur des critères manquants : " +
-          "un score partiel produirait un rang trompeur."
+        horsProfil
+          ? `Deux motifs distincts. ${horsProfil} titre(s) sont parfaitement ` +
+            "mesurés mais ne correspondent pas au profil retenu — le motif exact " +
+            "figure dans la colonne de droite. Les autres sont écartés parce que " +
+            "leurs données sont trop incomplètes pour produire un rang fiable."
+          : "Ces titres sont écartés du classement plutôt que notés sur des " +
+            "critères manquants : un score partiel produirait un rang trompeur."
       )
     );
 

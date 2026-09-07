@@ -7,6 +7,7 @@ Produit un executable unique. Les reglages et les donnees sont ecrits A COTE
 de cet executable au premier lancement : copier le dossier suffit a emporter
 l'outil, son historique et sa watchlist sur une autre machine.
 """
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # L'ecran de demarrage de PyInstaller repose sur tkinter. Il est fourni avec
@@ -21,13 +22,28 @@ except ImportError:
     ECRAN_DISPONIBLE = False
     print("PyInstaller : tkinter absent, construction sans ecran de demarrage.")
 
+# Configuration par defaut : recopiee a cote de l'executable au premier
+# lancement, pour rester modifiable sans reconstruction.
+#
+# ENUMERATION AUTOMATIQUE, et non liste ecrite a la main. Une liste explicite
+# a deja provoque une panne silencieuse : profils.yaml et esef.yaml, ajoutes
+# apres coup, n'etaient pas embarques. L'application demarrait sans erreur,
+# mais le selecteur de profils ne proposait plus qu'une entree et
+# l'historique europeen cessait d'etre complete — deux fonctions disparues
+# sans le moindre message. Le fichier settings.yaml personnel est exclu :
+# il contient l'adresse email transmise a la SEC et n'a pas a etre publie.
+CONFIGURATION = sorted(
+    (str(chemin.as_posix()), "config")
+    for chemin in Path("config").glob("*.yaml")
+    if chemin.name != "settings.yaml"
+)
+if not CONFIGURATION:
+    raise SystemExit("investassist.spec : aucun fichier de configuration trouve.")
+print(f"PyInstaller : {len(CONFIGURATION)} fichiers de configuration embarques "
+      f"({', '.join(Path(c).name for c, _ in CONFIGURATION)}).")
+
 donnees = [
-    # Configuration par defaut : recopiee a cote de l'executable au premier
-    # lancement, pour rester modifiable sans reconstruction.
-    ("config/scoring.yaml", "config"),
-    ("config/universes.yaml", "config"),
-    ("config/settings.example.yaml", "config"),
-    ("config/alerts.yaml", "config"),
+    *CONFIGURATION,
     # Interface web servie par le serveur local.
     ("web/index.html", "web"),
     ("web/assets", "web/assets"),

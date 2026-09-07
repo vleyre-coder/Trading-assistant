@@ -60,9 +60,17 @@ def test_recette_d_empaquetage_embarque_l_essentiel():
     """Une recette qui oublie l'interface ou la configuration produit un
     executable qui demarre puis affiche une page blanche."""
     recette = (ROOT / "investassist.spec").read_text(encoding="utf-8")
-    for ressource in ("web/index.html", "web/assets", "config/scoring.yaml",
-                      "config/universes.yaml", "config/settings.example.yaml"):
+    for ressource in ("web/index.html", "web/assets"):
         assert ressource in recette, f"ressource absente de l'empaquetage : {ressource}"
+    # La configuration n'est PLUS verifiee fichier par fichier : c'etait
+    # justement la faille. Ce test citait scoring.yaml, universes.yaml et
+    # settings.example.yaml, donc passait au vert alors que profils.yaml et
+    # esef.yaml, ajoutes plus tard, n'etaient pas embarques — deux fonctions
+    # perdues sans erreur. Ce qui est verifie ici est le MECANISME : la
+    # recette enumere le dossier, donc tout fichier a venir suit.
+    assert 'Path("config").glob("*.yaml")' in recette, (
+        "la recette doit énumérer config/*.yaml plutôt que lister des noms"
+    )
     assert '"lanceur.py"' in recette
     # Les bibliotheques de l'ancienne interface alourdiraient l'executable.
     assert '"streamlit"' in recette and '"plotly"' in recette
