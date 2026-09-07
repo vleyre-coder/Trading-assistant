@@ -32,6 +32,8 @@ from .alerts.rules import attach_earnings_dates
 from .chemins import dossier_donnees, dossier_site, resume as resume_chemins
 from .config import ScoringConfig, Settings, load_profils, load_universes
 from .fundamentals import FundamentalsService
+from .providers.actualite import ActualiteClient
+from .providers.macro import MacroClient
 from .screener import Screener, tickers_for
 from .storage import ALERT_KINDS, Database, score_from_row
 
@@ -39,6 +41,18 @@ log = logging.getLogger(__name__)
 
 VERSION_API = 1
 NOM_COOKIE = "investassist_jeton"
+
+CONTEXTE_AVERTISSEMENT = (
+    "Indicateurs publics affichés à titre d'information, avec leur période de "
+    "référence et leur date de publication. Ils ne constituent ni un signal, "
+    "ni une indication de la direction à donner à un investissement."
+)
+
+PRESSE_AVERTISSEMENT = (
+    "Titres de presse de tiers, relayés tels quels avec leur source. Ils ne "
+    "sont ni vérifiés ni repris par cet outil, n'entrent dans aucun calcul, "
+    "et n'engagent que leurs auteurs."
+)
 
 
 class Application:
@@ -52,6 +66,8 @@ class Application:
         self.db = Database(settings.database_path)
         self.service = FundamentalsService(settings)
         self.screener = Screener(settings, cfg, service=self.service, database=self.db)
+        self.macro = MacroClient(settings, self.service.cache)
+        self.actualite = ActualiteClient(settings, self.service.cache)
         self.jeton = secrets.token_urlsafe(24)
 
         self._verrou = threading.Lock()
@@ -169,6 +185,48 @@ class Application:
     def etat_analyse(self) -> dict[str, Any]:
         with self._verrou:
             return dict(self.analyse)
+
+    # ------------------------------------------------------------ contexte
+    def contexte(self, ticker: str | None = None) -> dict[str, Any]:
+        """Indicateurs macroeconomiques et actualite, pour information.
+
+        Cette vue ne produit aucun signal et ne designe aucune direction a
+        donner a un investissement : elle affiche des chiffres publies par
+        les institutions qui les produisent, et des titres de presse
+        attribues a leur source. L'outil ne sait pas ce qu'un taux directeur
+        implique pour un titre, et ne le pretend pas.
+
+        Une source indisponible n'est jamais fatale : la section
+        correspondante est simplement vide.
+        """
+        try:
+            indicateurs = [i.en_dict() for i in self.macro.indicateurs()]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Contexte macroéconomique indisponible : %s", exc)
+            indicateurs = []
+        try:
+            institutionnel = [a.en_dict() for a in self.actualite.institutionnel()]
+            presse = [a.en_dict() for a in self.actualite.presse()]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Actualité indisponible : %s", exc)
+            institutionnel, presse = [], []
+
+        titre = []
+        if ticker:
+            try:
+                titre = [a.en_dict() for a in self.actualite.par_titre(ticker)]
+            except Exception as exc:  # noqa: BLE001
+                log.debug("Actualité de %s indisponible : %s", ticker, exc)
+
+        return {
+            "indicateurs": indicateurs,
+            "institutionnel": institutionnel,
+            "presse": presse,
+            "titre": titre,
+            "releve_le": datetime.now().isoformat(timespec="seconds"),
+            "avertissement": CONTEXTE_AVERTISSEMENT,
+            "avertissement_presse": PRESSE_AVERTISSEMENT,
+        }
 
     # -------------------------------------------------------------- profils
     def classement(self, profil_cle: str | None = None) -> dict[str, Any] | None:
@@ -418,6 +476,10 @@ def construire_gestionnaire(app: Application):
                         "alertes_email": app.settings.alerts_email_enabled,
                     }
                 )
+
+            if chemin == "/api/contexte":
+                demande = parse_qs(urlparse(self.path).query).get("ticker", [""])[0]
+                return self._json(app.contexte(demande or None))
 
             if chemin == "/api/profils":
                 return self._json(app.profils_disponibles())
