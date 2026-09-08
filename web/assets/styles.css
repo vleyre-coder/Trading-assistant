@@ -10,23 +10,38 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces et encres */
-  --plane:          #f4f4f1;
-  --surface:        #fcfcfb;
-  --surface-alt:    #f2f2ee;
+  /* ---------------------------------------------------------------------
+     Palette monochrome. Contrastes MESURES, non choisis a l'oeil : encre
+     principale 19,8:1, secondaire 7,7:1, discrete 6,3:1 sur la carte et
+     5,8:1 sur le fond alternatif. Les trois niveaux passent donc le seuil
+     de 4,5:1 du texte courant — le gris discret de la version precedente
+     plafonnait a 3,28:1, insuffisant pour les periodes et les sources qui
+     s'y affichent.
+     --------------------------------------------------------------------- */
+  --plane:          #f6f6f6;
+  --surface:        #ffffff;
+  --surface-alt:    #f4f4f4;
   --surface-haut:   #ffffff;
-  --ink:            #14140f;
-  --ink-secondary:  #52514e;
-  --ink-muted:      #898781;
-  --grid:           #e6e5df;
-  --baseline:       #c3c2b7;
-  --border:         rgba(11, 11, 11, 0.10);
-  --border-fort:    rgba(11, 11, 11, 0.16);
+  --ink:            #0a0a0a;
+  --ink-secondary:  #535353;
+  --ink-muted:      #606060;
+  --grid:           #ececec;
+  --baseline:       #d4d4d4;
+  --border:         rgba(10, 10, 10, 0.09);
+  --border-fort:    rgba(10, 10, 10, 0.16);
 
-  /* Serie unique de visualisation */
-  --series:         #2a78d6;
-  --series-fonce:   #1c5cab;
-  --series-voile:   rgba(42, 120, 214, 0.10);
+  /* Serie de visualisation : l'encre elle-meme. Le validateur de palette
+     signale « lit comme du gris », a juste titre — mais sa portee est les
+     palettes CATEGORIELLES, ou la teinte porte l'identite d'une serie. Il
+     n'y a ici qu'UNE serie (le score, la tendance) : aucune identite a
+     distinguer, donc aucune teinte a depenser. Le seul critere qui
+     s'applique est le contraste sur la surface, verifie a 19,8:1.
+     --sur-series : ce qui s'ecrit PAR-DESSUS un aplat de serie. Sans ce
+     jeton, un bouton plein devenait blanc sur blanc en mode sombre. */
+  --series:         #0a0a0a;
+  --series-fonce:   #000000;
+  --series-voile:   rgba(10, 10, 10, 0.07);
+  --sur-series:     #ffffff;
 
   /* Statuts : jamais seuls porteurs de sens */
   --good:           #0ca30c;
@@ -49,26 +64,38 @@
   --ombre-1: 0 1px 2px rgba(16, 16, 12, 0.04);
   --ombre-2: 0 4px 16px rgba(16, 16, 12, 0.07);
   --largeur: 1320px;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  /* Police. L'esthetique visee est celle d'une grotesque neutre a chiffres
+     de meme largeur (Trade Republic utilise une police propriétaire de
+     cette famille). Aucune ressource externe n'est chargee — c'est une
+     regle du projet, verifiee par un test — donc la pile part des
+     grotesques reellement installees : Inter si presente, puis la police
+     systeme de chaque plateforme, celles de Windows (Segoe UI Variable)
+     et macOS (SF Pro via -apple-system) etant deja de cette famille.
+     « system-ui » vient AVANT le nom explicite « Segoe UI » pour obtenir
+     la variante variable moderne quand elle existe. */
+  --font: "Inter", "Inter Variable", system-ui, -apple-system,
+          "Segoe UI Variable Text", "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --plane:         #0d0d0d;
-    --surface:       #1a1a19;
-    --surface-alt:   #232322;
-    --surface-haut:  #232322;
-    --ink:           #f7f7f4;
-    --ink-secondary: #c3c2b7;
-    --ink-muted:     #8f8d86;
-    --grid:          #2c2c2a;
-    --baseline:      #3d3d3a;
-    --border:        rgba(255, 255, 255, 0.10);
-    --border-fort:   rgba(255, 255, 255, 0.18);
-    --series:        #3987e5;
-    --series-fonce:  #86b6ef;
-    --series-voile:  rgba(57, 135, 229, 0.16);
+    --plane:         #000000;
+    --surface:       #0e0e0e;
+    --surface-alt:   #171717;
+    --surface-haut:  #171717;
+    --ink:           #ffffff;
+    --ink-secondary: #b4b4b4;
+    --ink-muted:     #8c8c8c;
+    --grid:          #1f1f1f;
+    --baseline:      #333333;
+    --border:        rgba(255, 255, 255, 0.09);
+    --border-fort:   rgba(255, 255, 255, 0.17);
+    --series:        #ffffff;
+    --series-fonce:  #ffffff;
+    --series-voile:  rgba(255, 255, 255, 0.09);
+    --sur-series:    #0a0a0a;
     --ombre-1: 0 1px 2px rgba(0, 0, 0, 0.4);
     --ombre-2: 0 6px 20px rgba(0, 0, 0, 0.45);
   }
@@ -76,20 +103,21 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --plane:         #0d0d0d;
-  --surface:       #1a1a19;
-  --surface-alt:   #232322;
-  --surface-haut:  #232322;
-  --ink:           #f7f7f4;
-  --ink-secondary: #c3c2b7;
-  --ink-muted:     #8f8d86;
-  --grid:          #2c2c2a;
-  --baseline:      #3d3d3a;
-  --border:        rgba(255, 255, 255, 0.10);
-  --border-fort:   rgba(255, 255, 255, 0.18);
-  --series:        #3987e5;
-  --series-fonce:  #86b6ef;
-  --series-voile:  rgba(57, 135, 229, 0.16);
+  --plane:         #000000;
+  --surface:       #0e0e0e;
+  --surface-alt:   #171717;
+  --surface-haut:  #171717;
+  --ink:           #ffffff;
+  --ink-secondary: #b4b4b4;
+  --ink-muted:     #8c8c8c;
+  --grid:          #1f1f1f;
+  --baseline:      #333333;
+  --border:        rgba(255, 255, 255, 0.09);
+  --border-fort:   rgba(255, 255, 255, 0.17);
+  --series:        #ffffff;
+  --series-fonce:  #ffffff;
+  --series-voile:  rgba(255, 255, 255, 0.09);
+  --sur-series:    #0a0a0a;
   --ombre-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --ombre-2: 0 6px 20px rgba(0, 0, 0, 0.45);
 }
@@ -106,6 +134,11 @@ body {
   background: var(--plane);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Chiffres de meme largeur partout : sans cela les colonnes d'un
+     tableau financier se decalent d'une ligne a l'autre. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "cv05" 1;
 }
 
 :focus-visible {
@@ -137,6 +170,11 @@ body {
 
 .marque { display: flex; align-items: center; gap: 11px; flex: none; }
 .marque-logo { width: 30px; height: 30px; color: var(--series); flex: none; }
+/* Les barres du logo etaient peintes en blanc en dur : sur une plaque
+   devenue blanche en mode sombre, le logo se reduisait a un carre plein.
+   Elles suivent desormais la couleur de ce qui s'ecrit sur la serie. */
+.marque-logo .marque-barres,
+.chargement-logo .marque-barres { fill: var(--sur-series); }
 .marque-texte { display: flex; flex-direction: column; line-height: 1.15; }
 .marque-nom { font-size: 1rem; font-weight: 650; letter-spacing: -0.015em; }
 .marque-baseline {
@@ -156,8 +194,14 @@ body {
   transition: background 0.12s, color 0.12s;
 }
 .onglets button:hover { background: var(--surface-alt); color: var(--ink); }
+/* Onglet actif : trait d'encre sous le libelle, pas d'aplat colore. En
+   monochrome un aplat gris clair se confond avec le survol ; le trait,
+   lui, reste lisible et donne le rythme sobre d'une barre d'onglets
+   professionnelle. Le libelle passe aussi en gras : deux signaux, pas un. */
 .onglets button[aria-selected="true"] {
-  background: var(--series-voile); color: var(--series-fonce); font-weight: 600;
+  background: transparent; color: var(--ink); font-weight: 640;
+  box-shadow: inset 0 -2px 0 var(--ink);
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
 }
 
 .barre-actions { display: flex; align-items: center; gap: 10px; flex: none; }
@@ -258,7 +302,7 @@ main.enveloppe { padding-top: 24px; padding-bottom: 56px; }
   font-variant-numeric: tabular-nums;
 }
 .indicateur.accent { background: var(--series-voile); border-color: transparent; }
-.indicateur.accent .valeur { color: var(--series-fonce); }
+.indicateur.accent .valeur { color: var(--ink); }
 
 /* ============================================================ filtres */
 .filtres {
@@ -325,11 +369,19 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
 
 .num { font-variant-numeric: tabular-nums; }
 .ticker { font-weight: 640; letter-spacing: -0.01em; }
+/* Un lien ne peut pas se signaler par la couleur en monochrome : il se
+   signale par un soulignement discret, epaissi au survol. */
 .lien-titre {
-  color: var(--series); cursor: pointer; text-decoration: none;
-  font-weight: 640; letter-spacing: -0.01em;
+  color: var(--ink); cursor: pointer; font-weight: 640; letter-spacing: -0.01em;
+  text-decoration: underline;
+  text-decoration-color: var(--baseline);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
-.lien-titre:hover { text-decoration: underline; }
+.lien-titre:hover {
+  text-decoration-color: var(--ink);
+  text-decoration-thickness: 2px;
+}
 .secondaire { color: var(--ink-secondary); }
 
 /* Rang : pastille pour les trois premiers, chiffre nu ensuite.
@@ -340,7 +392,7 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
   font-size: 0.8rem; font-weight: 650; font-variant-numeric: tabular-nums;
   color: var(--ink-secondary);
 }
-.rang.podium { background: var(--series); color: #fff; }
+.rang.podium { background: var(--series); color: var(--sur-series); }
 
 /* Barre de grandeur en cellule : la valeur chiffree l'accompagne toujours. */
 .cellule-score { display: flex; align-items: center; gap: 9px; justify-content: flex-end; }
@@ -448,7 +500,7 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
 }
 .bouton:hover { background: var(--surface-alt); }
 .bouton.principal {
-  background: var(--series); border-color: var(--series); color: #fff;
+  background: var(--series); border-color: var(--series); color: var(--sur-series);
 }
 .bouton.principal:hover { background: var(--series-fonce); border-color: var(--series-fonce); }
 .bouton.discret { padding: 5px 11px; font-size: 0.79rem; }
@@ -606,7 +658,7 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
   color: var(--ink);
   box-shadow: inset 3px 0 0 var(--series);
 }
-.segment.actif .segment-label { color: var(--series-fonce); }
+.segment.actif .segment-label { color: var(--ink); }
 
 .profils-description {
   margin: 14px 0 0; font-size: var(--t-base); color: var(--ink-secondary);
@@ -663,10 +715,13 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
   line-height: 1.45;
 }
 .tuile-lien {
-  font-size: var(--t-petit); color: var(--series); text-decoration: none;
+  font-size: var(--t-petit); color: var(--ink-secondary);
   align-self: flex-start; margin-top: 2px;
+  text-decoration: underline;
+  text-decoration-color: var(--baseline);
+  text-underline-offset: 3px;
 }
-.tuile-lien:hover { text-decoration: underline; }
+.tuile-lien:hover { color: var(--ink); text-decoration-color: var(--ink); }
 
 /* Indicateur dont la dernière publication est trop ancienne pour décrire
    la situation actuelle. Le liseré est doublé d'un texte explicite : la
@@ -690,7 +745,10 @@ tbody tr.selectionnee td:first-child { box-shadow: inset 3px 0 0 var(--series); 
   font-size: var(--t-base); font-weight: 560; line-height: 1.45;
   letter-spacing: -0.008em;
 }
-.article-titre:hover { color: var(--series); text-decoration: underline; }
+.article-titre:hover {
+  color: var(--ink); text-decoration: underline;
+  text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
 .article-meta {
   display: flex; gap: 12px; flex-wrap: wrap;
   font-size: var(--t-petit); color: var(--ink-muted);
