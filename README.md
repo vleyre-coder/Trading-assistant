@@ -238,6 +238,7 @@ par appel réel**, pas reprises d'une documentation.
 | **SEC EDGAR** (`data.sec.gov`, API XBRL `companyfacts`) | aucune | HTTP 200, illimité | **≥ 6 exercices annuels** exploitables : CA, résultat net, résultat opérationnel, amortissements, capitaux propres, dette, trésorerie, actifs/passifs courants, BPA dilué, dividende déclaré. Sociétés déposant aux **États-Unis** uniquement. Limite officielle : 10 requêtes/s, User-Agent identifiant obligatoire. |
 | **Yahoo Finance** via `yfinance` | aucune | fonctionnel | Cours (5 ans), capitalisation, P/E, P/B, ROE, rendement, secteur, calendrier de publication, dividendes et divisions d'actions. Couvre l'Europe. **Mais seulement 4 à 5 exercices** dans les états financiers annuels. |
 | **Dépôts ESEF européens** (`filings.xbrl.org`) | aucune | HTTP 200, 25 892 dépôts / 27 pays | Rapports annuels officiels en XBRL des sociétés cotées dans l'Union, depuis l'exercice 2020. **Trois exercices par dépôt**, comparatifs inclus : chiffre d'affaires, résultat net, résultat brut, capitaux propres, total de l'actif, actifs/passifs courants, trésorerie, emprunts, flux d'exploitation, BPA. Seules les balises IFRS **normalisées** sont lues, jamais les extensions propres à l'émetteur. |
+| **BCE, taux de change de référence** (`data-api.ecb.europa.eu`, série `EXR`) | aucune | HTTP 200, série quotidienne depuis 1999 | Taux de référence quotidiens, cotés en unités de devise **pour un euro**. Servent à convertir une capitalisation dans la devise des comptes quand les deux diffèrent, et à ramener toutes les capitalisations à l'euro. Vérifiée sur USD, CNY, GBP et CHF. |
 | **Financial Modeling Prep** | requise (gratuite) | 250 req/jour | Actions **US uniquement** (le global est payant), 5 ans de cours, **5 trimestres** d'états financiers, 500 Mo/30 jours. Les points d'entrée `/api/v3/` sont en fin de vie au profit de `/stable/`. |
 
 ### Pourquoi FMP n'est qu'une source d'appoint — et à quoi il sert quand même
@@ -495,7 +496,7 @@ valorisables pour être significatif.
   des 2 derniers) dès que 4 exercices sont disponibles, pour ne pas dépendre
   d'un exercice exceptionnel.
 
-### Deux pièges de données traités explicitement
+### Quatre pièges de données traités explicitement
 
 1. **Divisions d'actions.** EDGAR restitue les données par action *telles que
    publiées à l'époque du dépôt*, et retraite les comparatifs dans les dépôts
@@ -508,6 +509,85 @@ valorisables pour être significatif.
 2. **P/E historique.** Le cours utilisé est ajusté des divisions d'actions mais
    **pas** des dividendes (`auto_adjust=False`) : un cours réajusté des
    dividendes sous-estimerait mécaniquement les P/E passés.
+3. **Une seule monnaie par exercice.** Une société peut coter dans une devise
+   et publier ses comptes dans une autre — ASML dépose à la SEC en euro et
+   cote en dollar, TotalEnergies publie en dollar et cote en euro. Trois
+   endroits mélangeaient donc deux monnaies sans le moindre signe visible :
+
+   - **Dans un même exercice, entre deux balises.** Les comptes déposés à la
+     SEC par un émetteur étranger existent dans sa devise **et** en
+     traduction de commodité en dollar, mais pas pour toutes les balises ni
+     toutes les années. La lecture choisissait la devise **balise par
+     balise**. Résultat mesuré sur PDD Holdings : chiffre d'affaires lu en
+     dollar (61,8 Md) et marge brute complétée en yuan (243,0 Md) dans le
+     même exercice — soit une **marge brute de 394 % du chiffre d'affaires**
+     et un free cash flow supérieur aux ventes, d'où un rendement du free
+     cash flow de **90 %** qui saturait le barème. Le titre sortait **premier
+     du classement, tous profils confondus**. La devise est désormais fixée
+     **une fois pour toutes par société** — celle qui couvre le plus
+     d'exercices de la fenêtre analysée, le dollar à égalité — et aucun poste
+     n'est jamais lu dans une autre. Après correction, la marge brute de PDD
+     s'étage entre 56 % et 76 % et son free cash flow entre 24 % et 38 % du
+     chiffre d'affaires.
+   - **Entre deux sources.** Quand la source principale ne couvre pas un
+     poste, la complémentaire le fournit — en comptant parfois dans une autre
+     devise. Ces valeurs sont maintenant converties au taux de référence de
+     la **clôture de l'exercice** (un poste de 2022 se convertit avec la
+     parité de 2022), et la liste des postes convertis est affichée. Sans
+     taux disponible, le poste reste absent : une lacune se voit dans la
+     couverture de données, un montant dans la mauvaise monnaie ne se voit
+     pas du tout. Cinq postes de PDD étaient concernés.
+   - **Entre le marché et les comptes.** Le rendement du free cash flow, la
+     valeur d'entreprise rapportée au chiffre d'affaires et le P/E historique
+     rapportent une valeur de marché à une valeur comptable. La valeur de
+     marché est convertie dans la devise des comptes — au taux de la clôture
+     pour un P/E passé. Mesure sur ASML : médiane du P/E historique 38,7
+     avant, 36,3 après, sous-score du critère 30,7 → 21,0.
+
+   La devise qui fait foi est celle **constatée dans les données**, jamais
+   celle annoncée par les métadonnées de marché : Yahoo déclare le yuan pour
+   PDD Holdings alors que les comptes retenus, déposés à la SEC, sont en
+   dollar. Croire la métadonnée aurait converti une série déjà homogène,
+   c'est-à-dire fabriqué une erreur en croyant en corriger une.
+
+   Les dépôts ESEF européens portent la même exigence : l'unité XBRL
+   (`iso4217:EUR`) était ignorée, elle est désormais lue, la devise dominante
+   du dépôt retenue, et les faits libellés autrement écartés. Un dépôt en
+   euro confronté à une série en dollar divergeait par ailleurs de 15 % sur
+   le chiffre d'affaires : l'historique ESEF était alors écarté pour un motif
+   **faux** — « périmètres de consolidation différents » — alors que les deux
+   sources disaient la même chose dans deux monnaies. La mise à la même
+   devise précède maintenant ce contrôle.
+
+4. **Le chiffre d'affaires est un TOTAL, pas la première balise trouvée.**
+   Les états américains offrent plusieurs balises pour le chiffre d'affaires,
+   et la lecture s'arrêtait à la première renseignée. Deux conséquences,
+   toutes deux mesurées sur l'univers analysé :
+
+   - **Une ligne prise pour le total.** Certains émetteurs réservent
+     « revenus des contrats clients » à une seule ligne de leur compte de
+     résultat et publient le total sous « Revenus ». Charter Communications
+     ressortait ainsi à **889 M$** de chiffre d'affaires au lieu de
+     **54,8 Md$** — 98 % d'écart, une marge brute de **3 111 %**, une
+     croissance entièrement fausse. MercadoLibre à 20,3 Md$ au lieu de
+     28,9 Md$ (son score le fait entrer dans les huit premiers après
+     correction). Un total n'ayant aucune composante plus grande que lui,
+     c'est la plus grande valeur de l'exercice qui est retenue — règle
+     appliquée **au seul chiffre d'affaires** : « la plus grande » n'a aucun
+     sens pour un résultat net, où part du groupe et ensemble consolidé sont
+     deux définitions légitimes.
+   - **Un historique tronqué.** Les émetteurs ont changé de balise en 2018
+     (adoption d'ASC 606) et certains sont revenus en arrière. S'arrêter à la
+     première balise coupait donc l'historique : **9 titres américains sur
+     101** n'avaient pas cinq exercices complets, dont **NVIDIA (1 sur 5)**,
+     **PayPal (0 sur 5)**, **Exelon (0 sur 5)** et **Alphabet (4 sur 5)**.
+     Les trous étaient comblés par la source complémentaire, qui ne remonte
+     que quatre ou cinq ans : au-delà, la fenêtre retenue **enjambait le
+     trou**. PayPal calculait sa croissance de 2019 à 2025 sur cinq exercices
+     couvrant sept années, et Comcast un TCAM de bénéfice par action de
+     **68 %** sur une fenêtre de trois ans partant d'un exercice déprimé.
+     Ces deux titres étaient 8ᵉ et 12ᵉ du classement ; ils sont 23ᵉ et 25ᵉ
+     avec une fenêtre complète.
 
 ## Fonctionnalités
 
@@ -626,13 +706,35 @@ que vous avez défini vous-même, et ne constitue pas une incitation à agir.
   laissait croire à un défaut de la source : il nomme maintenant la vraie
   cause, et la rentabilité est mesurée par le **ROCE**, calculable sur un
   capital employé même quand les fonds propres sont négatifs.
+- **Les comptes annuels ont, par nature, plusieurs mois d'âge.** Mesuré sur
+  l'univers analysé : le dernier exercice retenu s'est clôturé il y a
+  **251 jours en médiane** (8,3 mois), 312 jours au 9ᵉ décile, 435 jours au
+  maximum — ce dernier cas étant normal pour une société clôturant en juin,
+  dont l'exercice suivant n'est pas encore publié. Les ratios de valorisation
+  rapportent donc une capitalisation d'aujourd'hui à un résultat de l'année
+  dernière. Le seul remède serait un cumul sur les **12 derniers mois**
+  reconstitué à partir des trimestres, et sa disponibilité a été mesurée par
+  appel réel sur les 142 titres : **100 sur 101 aux États-Unis**, mais
+  **9 sur 41 en Europe** — les émetteurs européens publient au semestre, pas
+  au trimestre (LVMH ne publie aucun compte de résultat trimestriel). Le
+  retenir donnerait aux valeurs américaines des chiffres vieux de trois mois
+  et aux européennes des chiffres vieux d'un an, **sur le pilier même où
+  elles sont comparées entre elles** : une société américaine en croissance
+  y gagnerait un avantage systématique. L'outil reste donc sur l'exercice
+  annuel, comparable pour tous, plutôt que d'échanger une imprécision
+  déclarée contre un biais caché. Le P/E courant, lui, est déjà un P/E sur
+  12 mois glissants — il vient de Yahoo, qui le calcule ainsi.
 - Les données ne sont **pas auditées**. Une erreur de source se propage au
   score. Le détail par critère est là pour vous permettre de la repérer.
 - **Durée d'exécution** : mesurée à **478 secondes pour 143 titres** (CAC 40 +
   Nasdaq-100) sans cache, soit environ 3,3 secondes par titre avec 4 requêtes
   en parallèle ; **42 secondes** avec le cache chaud. Le premier passage
   télécharge en plus les dépôts ESEF des valeurs européennes (environ 5 Mo par
-  société, une seule fois). Un cache disque de
+  société, une seule fois — et une nouvelle fois après une mise à jour qui
+  change la structure du fichier réduit mis en cache, la version étant
+  inscrite dans la clé : sans cela, une entrée écrite par la version
+  précédente serait relue telle quelle et le nouveau champ resterait vide,
+  silencieusement). Un cache disque de
   12 h (configurable) évite de reconsommer les quotas à chaque rafraîchissement
   d'écran. Sous forte parallélisation, Yahoo renvoie parfois un contenu tronqué
   avec un code HTTP 200 : ces réponses sont détectées, réessayées et **jamais**
@@ -694,3 +796,20 @@ non-conseil est vérifié dans le HTML servi, indépendamment du JavaScript.
   tant que la condition reste vraie.
 - Les données par action d'EDGAR doivent être retraitées des divisions
   d'actions selon la date de **dépôt**, jamais deux fois.
+- **Aucun état de lecture partagé entre les fils d'exécution.** L'analyse
+  charge quatre titres en parallèle sur un même client EDGAR. Les dates de
+  clôture et de dépôt de l'exercice en cours de lecture vivaient sur
+  l'instance : un titre lu pendant qu'un autre démarrait voyait ses dates
+  **réinitialisées au milieu de son analyse**. Effet reproduit en test : les
+  cinq exercices du titre le plus lent revenaient sans aucune date de
+  clôture, ce qui supprime silencieusement son P/E historique — le critère a
+  besoin de la clôture pour retrouver le cours de fin d'exercice — et prive
+  le retraitement des divisions d'actions de sa date de référence, soit
+  exactement le piège précédent. Aucune erreur, aucun message : juste des
+  critères manquants. Tout l'état de lecture est désormais local à l'appel,
+  et un test force l'entrelacement au lieu de l'espérer.
+- Une seule monnaie par exercice : ni entre deux balises d'une même source,
+  ni entre deux sources, ni entre le marché et les comptes.
+- La palette de l'interface reste neutre et chaque niveau d'encre tient le
+  contraste WCAG AA sur **toutes** les surfaces qu'il peut rencontrer, y
+  compris celle composée par le voile de série.

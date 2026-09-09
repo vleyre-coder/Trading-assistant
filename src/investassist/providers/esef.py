@@ -32,6 +32,7 @@ Limites assumees :
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -47,6 +48,11 @@ BASE_URL = "https://filings.xbrl.org"
 
 # Un exercice publie ne change plus : le cache peut etre quasi permanent.
 CACHE_HEURES = 24 * 365
+
+# Version du fichier reduit mis en cache. A incrementer des que sa structure
+# change : sans cela, une entree ecrite par la version precedente est relue
+# telle quelle et le nouveau champ reste vide, silencieusement.
+SCHEMA_FAITS = 2
 
 # Cles de dimension communes a tout fait XBRL. Toute AUTRE cle est un axe de
 # ventilation (par segment, par composante de capitaux propres...) : le fait
@@ -89,6 +95,16 @@ INSTANT_TAGS: dict[str, tuple[str, ...]] = {
 DUREE_MIN, DUREE_MAX = 330, 400
 
 
+def devise_de_l_unite(unite: str) -> str | None:
+    """Devise portee par une unite XBRL.
+
+    Forme reelle observee sur filings.xbrl.org : « iso4217:EUR » pour un
+    montant, « iso4217:EUR/xbrli:shares » pour un montant par action.
+    """
+    trouve = re.search(r"iso4217:([A-Z]{3})", unite or "")
+    return trouve.group(1) if trouve else None
+
+
 def _iso(valeur: str) -> date | None:
     try:
         return datetime.fromisoformat(valeur).date()
@@ -119,6 +135,8 @@ class EsefClient:
         # Cache dedie : la duree de vie courte des cours n'a pas de sens pour
         # un rapport annuel deja publie.
         self.cache = DiskCache(base.dir, CACHE_HEURES)
+        # Devise du depot en cours de lecture.
+        self._devise: str | None = None
         self.filers = load_esef_filers()
 
     # ------------------------------------------------------------- index
@@ -152,7 +170,8 @@ class EsefClient:
 
     # --------------------------------------------------------- faits XBRL
     def _faits(self, chemin: str) -> dict[str, Any] | None:
-        cached = self.cache.get("esef_faits", chemin)
+        cle = f"{chemin}:v{SCHEMA_FAITS}"
+        cached = self.cache.get("esef_faits", cle)
         if cached is not None:
             return cached
         data = get_json(
@@ -163,7 +182,7 @@ class EsefClient:
         # On ne conserve que les faits utiles : le fichier brut pese environ
         # 5 Mo, dont l'essentiel est le texte des annexes.
         reduit = self._reduire(data)
-        self.cache.set("esef_faits", chemin, reduit)
+        self.cache.set("esef_faits", cle, reduit)
         return reduit
 
     @staticmethod
@@ -184,6 +203,11 @@ class EsefClient:
                 continue
             retenus.append(
                 {"concept": dim["concept"], "period": dim.get("period", ""),
+                 # L'unite dit dans QUELLE MONNAIE le montant est exprime. Elle
+                 # etait jetee : un depot melangeant deux devises, ou un
+                 # emetteur publiant dans une devise autre que celle de sa
+                 # cotation, passait donc inapercu.
+                 "unit": dim.get("unit", ""),
                  "value": fait.get("value")}
             )
         return {"faits": retenus}
@@ -220,6 +244,9 @@ class EsefClient:
                 f"(exercice {fiscal_year_of(choisi[0])})."
             ]
 
+        # A fixer AVANT toute lecture : elle filtre les faits retenus.
+        self._devise = self.devise_du_depot(faits)
+
         par_exercice: dict[int, dict[str, float]] = {}
         for champ, tags in DUREE_TAGS.items():
             for exercice, valeur in self._durees(faits, tags).items():
@@ -239,12 +266,40 @@ class EsefClient:
             da = valeurs.get("depreciation_amortisation")
             if op is not None and da is not None:
                 valeurs["ebitda"] = op + da
-            records.append(AnnualRecord(fiscal_year=exercice, values=dict(valeurs)))
+            records.append(AnnualRecord(
+                fiscal_year=exercice, values=dict(valeurs), devise=self._devise
+            ))
 
         # Un exercice sans chiffre d'affaires ne sert a rien en aval : la
         # fenetre d'analyse est justement definie sur ce poste.
         records = [r for r in records if r.get("revenue") is not None]
         return records, []
+
+    @staticmethod
+    def devise_du_depot(faits: dict[str, Any]) -> str | None:
+        """Devise de presentation du depot : la plus frequente de ses faits.
+
+        Un depot est normalement libelle dans une seule devise, mais rien ne
+        l'impose fait par fait. Retenir la dominante et ecarter les autres
+        evite d'additionner deux monnaies dans un meme exercice.
+        """
+        compte: dict[str, int] = {}
+        for fait in faits.get("faits") or []:
+            devise = devise_de_l_unite(fait.get("unit", ""))
+            if devise:
+                compte[devise] = compte.get(devise, 0) + 1
+        if not compte:
+            return None
+        return max(compte, key=lambda d: (compte[d], d == "EUR", d))
+
+    @staticmethod
+    def _bonne_devise(fait: dict[str, Any], devise: str | None) -> bool:
+        """Vrai si le fait compte dans la devise retenue (ou n'est pas un
+        montant, cas d'un nombre d'actions)."""
+        if devise is None:
+            return True
+        portee = devise_de_l_unite(fait.get("unit", ""))
+        return portee is None or portee == devise
 
     def _durees(self, faits: dict[str, Any], tags: tuple[str, ...]) -> dict[int, float]:
         """Valeurs annuelles par exercice, premiere balise renseignee gagne."""
@@ -253,6 +308,8 @@ class EsefClient:
             trouve: dict[int, float] = {}
             for fait in faits["faits"]:
                 if fait["concept"] != concept or "/" not in fait["period"]:
+                    continue
+                if not self._bonne_devise(fait, self._devise):
                     continue
                 debut_txt, fin_txt = fait["period"].split("/", 1)
                 debut, fin = _iso(debut_txt), _iso(fin_txt)
@@ -274,6 +331,8 @@ class EsefClient:
             trouve: dict[int, float] = {}
             for fait in faits["faits"]:
                 if fait["concept"] != concept or "/" in fait["period"]:
+                    continue
+                if not self._bonne_devise(fait, self._devise):
                     continue
                 instant = _iso(fait["period"])
                 valeur = _nombre(fait["value"])

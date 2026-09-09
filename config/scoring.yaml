@@ -364,13 +364,14 @@ criteria:
   market_size:
     pillar: risk
     weight: 0.15
-    label: "Capitalisation boursière (milliards)"
+    label: "Capitalisation boursière (milliards d'euros)"
     unit: ratio
     higher_is_better: true
     # Une grande capitalisation n'est pas un gage de performance ; elle
     # reduit en revanche le risque de liquidite et la sensibilite a un
-    # evenement isole. Capitalisations comparees sans conversion de devise :
-    # l'ecart euro/dollar reste inferieur a l'echelle des paliers.
+    # evenement isole. Les capitalisations sont ramenees a l'euro au taux de
+    # reference de la BCE : les paliers ci-dessous sont donc en milliards
+    # d'euros, et un titre cote en dollar n'est plus avantage de 15 %.
     points: [[1.0, 0], [5.0, 35], [20.0, 65], [100.0, 90], [500.0, 100]]
 
   # ================= SIGNAL QUALITATIF (phase 2, inactif) =================

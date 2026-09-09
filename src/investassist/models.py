@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Protocol
 
 # Metriques annuelles normalisees. Toute source (Yahoo, EDGAR, FMP) doit se
 # ramener a ce vocabulaire : le reste du code ne connait que ces cles.
@@ -32,6 +32,11 @@ ANNUAL_FIELDS = (
     "shares_diluted",    # nombre moyen d'actions diluees : mesure la dilution
 )
 
+# Seul champ annuel qui n'est PAS un montant : un nombre d'actions ne se
+# convertit pas d'une devise a l'autre. Tous les autres, y compris les
+# donnees par action, sont des montants.
+CHAMPS_NON_MONETAIRES = frozenset({"shares_diluted"})
+
 
 @dataclass
 class AnnualRecord:
@@ -45,6 +50,10 @@ class AnnualRecord:
     # d'actions : EDGAR restitue les comparatifs sur la base en vigueur au
     # moment du depot.
     filed: dict[str, str] = field(default_factory=dict)
+    # Devise des montants de cet exercice. Renseignee par la source, elle
+    # permet de refuser — ou de convertir — une completion venue d'une autre
+    # source qui compterait dans une autre monnaie.
+    devise: str | None = None
 
     def get(self, name: str) -> float | None:
         v = self.values.get(name)
@@ -67,6 +76,14 @@ class Snapshot:
     industry: str | None = None
     country: str | None = None
     currency: str | None = None
+    # Devise des etats financiers TELLE QUE YAHOO L'ANNONCE. Six titres sur
+    # 143 de l'univers analyse y declarent une devise differente de celle de
+    # leur cotation. Attention : cette metadonnee decrit ce que la societe
+    # publie, pas ce que nos sources nous ont renvoye — pour PDD Holdings
+    # elle annonce le yuan alors que les comptes retenus, deposes a la SEC,
+    # sont en dollar. Elle ne sert donc que de repli : la devise qui fait foi
+    # est celle constatee dans les donnees (Fundamentals.devise_comptes).
+    reporting_currency: str | None = None
     exchange: str | None = None
     price: float | None = None
     market_cap: float | None = None
@@ -78,6 +95,17 @@ class Snapshot:
     next_earnings_date: date | None = None
     last_earnings_date: date | None = None
     as_of: datetime | None = None
+
+
+class FournisseurDeChange(Protocol):
+    """Ce que les criteres attendent d'une source de taux de change.
+
+    Declare comme protocole et non importe : les criteres restent
+    calculables sans reseau, et un test peut fournir un taux fixe.
+    """
+
+    def facteur(self, de: str, vers: str, le: date | None = None) -> float | None:
+        ...
 
 
 @dataclass
@@ -94,6 +122,77 @@ class Fundamentals:
     # echec technique (source bridee, ticker inconnu), a distinguer d'un titre
     # dont les fondamentaux sont reellement incomplets.
     fetch_failed: bool = False
+    # Source de taux de change, injectee par le service. Absente, les
+    # criteres qui melangent marche et comptabilite se declarent
+    # indisponibles au lieu de renvoyer un chiffre faux — sauf, bien sur,
+    # quand les deux devises sont les memes, cas de la quasi-totalite des
+    # titres, qui ne demande aucun taux.
+    change: FournisseurDeChange | None = None
+    # Devise dans laquelle les exercices retenus comptent, telle que la
+    # source principale la publie. Distincte de la devise de cotation :
+    # TotalEnergies cote en euro et publie en dollar.
+    devise_comptes: str | None = None
+
+    @property
+    def devise_cotation(self) -> str:
+        """Devise dans laquelle le titre cote (prix, capitalisation)."""
+        return (self.snapshot.currency or "").upper()
+
+    @property
+    def devise_etats(self) -> str:
+        """Devise des comptes retenus.
+
+        Celle constatee dans les donnees lues, et non celle annoncee par les
+        metadonnees de marche : pour PDD Holdings, Yahoo declare le yuan
+        alors que les comptes deposes a la SEC et retenus ici sont en dollar.
+        Se rabat sur la cotation quand aucune source ne l'a renseignee.
+        """
+        return (
+            self.devise_comptes
+            or self.snapshot.reporting_currency
+            or self.snapshot.currency
+            or ""
+        ).upper()
+
+    @property
+    def devises_divergentes(self) -> bool:
+        return bool(
+            self.devise_cotation
+            and self.devise_etats
+            and self.devise_cotation != self.devise_etats
+        )
+
+    def facteur_vers_etats(self, le: date | None = None) -> float | None:
+        """Multiplicateur pour exprimer une valeur de MARCHE dans la devise
+        des comptes — le sens utile : un ratio se lit dans la devise ou les
+        deux termes sont homogenes.
+
+        Renvoie 1,0 quand les devises coincident (sans aucun appel), et None
+        quand elles divergent et que le taux est introuvable.
+        """
+        if not self.devises_divergentes:
+            return 1.0
+        if self.change is None:
+            return None
+        return self.change.facteur(self.devise_cotation, self.devise_etats, le)
+
+    def vers_etats(self, montant: float | None, le: date | None = None) -> float | None:
+        """Un montant de MARCHE exprime dans la devise des comptes."""
+        if montant is None:
+            return None
+        f = self.facteur_vers_etats(le)
+        return None if f is None else montant * f
+
+    def facteur_vers(self, devise: str, le: date | None = None) -> float | None:
+        """Multiplicateur pour exprimer une valeur de MARCHE dans <devise>."""
+        cible = (devise or "").upper()
+        if not cible or not self.devise_cotation:
+            return None
+        if cible == self.devise_cotation:
+            return 1.0
+        if self.change is None:
+            return None
+        return self.change.facteur(self.devise_cotation, cible, le)
 
     @property
     def years_available(self) -> int:

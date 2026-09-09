@@ -87,6 +87,14 @@ INSTANT_TAGS: dict[str, tuple[str, ...]] = {
 
 ANNUAL_FORMS = ("10-K", "10-K/A", "20-F", "40-F")
 
+# Agregats qui sont des TOTAUX : aucune de leurs composantes ne peut etre plus
+# grande qu'eux. Pour ceux-la, toutes les balises candidates sont lues et la
+# plus grande valeur de l'exercice est retenue. Voir _annual_flows.
+# Volontairement limite au chiffre d'affaires : « la plus grande » n'a aucun
+# sens pour un resultat net, ou deux definitions legitimes (part du groupe,
+# ensemble consolide) divergent sans que la plus grande soit la bonne.
+TOTAUX_CONSOLIDES = frozenset({"revenue"})
+
 
 def _parse_date(value: str | None) -> date | None:
     if not value:
@@ -114,8 +122,6 @@ class EdgarClient:
         self.limiter = RateLimiter(settings.sec_rate_limit)
         self.cache = cache or DiskCache(settings.cache_dir, settings.cache_ttl_hours)
         self._ticker_map: dict[str, str] | None = None
-        self._period_ends: dict[int, date] = {}
-        self._filed: dict[tuple[str, int], str] = {}
 
     # ---------------------------------------------------------------- CIK
     def ticker_to_cik(self, ticker: str) -> str | None:
@@ -150,34 +156,126 @@ class EdgarClient:
         return data
 
     # ------------------------------------------------------------ parsing
+    # Unites non monetaires : elles ne dependent d'aucune devise et restent
+    # lisibles quelle que soit celle retenue pour les comptes.
+    UNITES_NEUTRES = ("shares", "pure")
+
+    def _devise_des_comptes(self, facts: dict[str, Any], *, fenetre: int = 5) -> str:
+        """Devise UNIQUE dans laquelle lire tous les postes monetaires.
+
+        Pourquoi choisir une fois pour toutes plutot que balise par balise :
+        un emetteur etranger cote aux Etats-Unis depose ses comptes dans sa
+        devise ET une traduction de commodite en dollar, mais pas forcement
+        pour toutes les balises ni toutes les annees. Le choix balise par
+        balise fabriquait alors des exercices MELANGES.
+
+        Cas mesure sur PDD Holdings : chiffre d'affaires lu en dollar
+        (61,8 Md) et marge brute completee en yuan (243,0 Md) dans le meme
+        exercice — une marge brute de 394 % du chiffre d'affaires, et un free
+        cash flow superieur au chiffre d'affaires.
+
+        Regle : la devise qui couvre le plus d'exercices recents sur les
+        postes structurants ; a egalite, le dollar, unite de reference de la
+        SEC.
+        """
+        couverture: dict[str, set[int]] = {}
+        for poste in ("revenue", "net_income", "operating_income"):
+            for tag in FLOW_TAGS[poste]:
+                node = self._noeud(facts, tag)
+                if not node:
+                    continue
+                for unite, entrees in (node.get("units") or {}).items():
+                    if unite in self.UNITES_NEUTRES or "/" in unite:
+                        continue
+                    for e in entrees:
+                        if e.get("form") not in ANNUAL_FORMS:
+                            continue
+                        debut, fin = _parse_date(e.get("start")), _parse_date(e.get("end"))
+                        if not debut or not fin or not 330 <= (fin - debut).days <= 400:
+                            continue
+                        couverture.setdefault(unite, set()).add(fiscal_year_of(fin))
+        if not couverture:
+            return "USD"
+        # Seuls les exercices recents comptent : une devise qui couvre 2016
+        # mais pas 2025 n'aide en rien pour une fenetre de cinq exercices.
+        recents = sorted({a for annees in couverture.values() for a in annees})[-fenetre:]
+        classement = sorted(
+            couverture,
+            key=lambda u: (len(couverture[u] & set(recents)), u == "USD", u),
+            reverse=True,
+        )
+        return classement[0]
+
     @staticmethod
-    def _units(facts: dict[str, Any], tag: str) -> list[dict[str, Any]] | None:
+    def _noeud(facts: dict[str, Any], tag: str) -> dict[str, Any] | None:
         for taxonomy in ("us-gaap", "ifrs-full", "dei"):
             node = (facts.get("facts") or {}).get(taxonomy, {}).get(tag)
             if node:
-                units = node.get("units") or {}
-                # On privilegie USD puis USD/shares, sinon la premiere unite.
-                for key in ("USD", "USD/shares", "pure"):
-                    if key in units:
-                        return units[key]
-                if units:
-                    return next(iter(units.values()))
+                return node
+        return None
+
+    @classmethod
+    def _units(
+        cls, facts: dict[str, Any], tag: str, devise: str = "USD"
+    ) -> list[dict[str, Any]] | None:
+        """Serie d'un poste, dans la devise retenue pour la societe UNIQUEMENT.
+
+        Aucune retombee sur une autre devise : mieux vaut un poste absent —
+        que la source complementaire pourra fournir, convertie et signalee —
+        qu'un exercice qui additionne deux monnaies.
+
+        La devise est un PARAMETRE et non un attribut : ce client est partage
+        par plusieurs fils d'execution (voir annual_records).
+        """
+        node = cls._noeud(facts, tag)
+        if not node:
+            return None
+        units = node.get("units") or {}
+        for key in (devise, f"{devise}/shares", *cls.UNITES_NEUTRES):
+            if key in units:
+                return units[key]
         return None
 
     def _annual_flows(
-        self, facts: dict[str, Any], tags: Iterable[str], name: str = ""
-    ) -> dict[int, float]:
+        self,
+        facts: dict[str, Any],
+        tags: Iterable[str],
+        *,
+        devise: str = "USD",
+        total_consolide: bool = False,
+    ) -> dict[int, tuple[str, float, date]]:
         """Valeurs annuelles d'un agregat de flux (CA, resultat...).
 
         On ne garde que les periodes d'environ 12 mois issues d'un rapport
         annuel, et pour chaque exercice la publication la plus recente
         (les retraitements ecrasent les premieres versions).
+
+        Renvoie, par exercice, (date de depot, valeur, date de cloture). Le
+        depot et la cloture ne sont pas des details : c'est la date de DEPOT
+        qui dit si une donnee par action est deja retraitee d'une division
+        d'actions, et la cloture qui permet de retrouver le cours de fin
+        d'exercice. Ils etaient auparavant stockes sur l'instance — voir
+        annual_records.
+
+        total_consolide : l'agregat recherche est un TOTAL, dont aucune
+        composante ne peut etre plus grande. Toutes les balises candidates
+        sont alors lues et la plus grande valeur de chaque exercice est
+        retenue, au lieu de s'arreter a la premiere balise renseignee.
+
+        Pourquoi : certains emetteurs reservent la balise « revenus des
+        contrats clients » a UNE LIGNE de leur compte de resultat et publient
+        le total sous « Revenus ». Mesure sur l'univers analyse — Charter
+        Communications, chiffre d'affaires 2025 lu a 889 M$ au lieu de
+        54,8 Md$ (98 % d'ecart), et MercadoLibre a 20,3 Md$ au lieu de
+        28,9 Md$. Deux titres sur 101 americains, mais toute la croissance,
+        toutes les marges et tous les ratios de valorisation en dependent.
         """
         best: dict[int, tuple[str, float, date]] = {}
         for tag in tags:
-            entries = self._units(facts, tag)
+            entries = self._units(facts, tag, devise)
             if not entries:
                 continue
+            courant: dict[int, tuple[str, float, date]] = {}
             for e in entries:
                 if e.get("form") not in ANNUAL_FORMS:
                     continue
@@ -192,23 +290,34 @@ class EdgarClient:
                 val = e.get("val")
                 if val is None:
                     continue
-                prev = best.get(fy)
+                prev = courant.get(fy)
+                # Publication la plus recente : les retraitements ecrasent les
+                # premieres versions.
                 if prev is None or filed > prev[0]:
-                    best[fy] = (filed, float(val), end)
-            if best:
-                # Balise trouvee : on ne melange pas plusieurs definitions du
-                # meme agregat, sauf pour completer des exercices manquants.
-                break
-        self._period_ends.update({fy: e for fy, (_, _, e) in best.items()})
-        if name:
-            self._filed.update({(name, fy): f for fy, (f, _, _) in best.items()})
-        return {fy: v for fy, (_, v, _) in best.items()}
+                    courant[fy] = (filed, float(val), end)
+            if not total_consolide:
+                for fy, valeur in courant.items():
+                    prev = best.get(fy)
+                    if prev is None or valeur[0] > prev[0]:
+                        best[fy] = valeur
+                if best:
+                    # Balise trouvee : on ne melange pas plusieurs definitions
+                    # du meme agregat.
+                    break
+                continue
+            for fy, valeur in courant.items():
+                prev = best.get(fy)
+                if prev is None or valeur[1] > prev[1]:
+                    best[fy] = valeur
+        return best
 
-    def _instant_values(self, facts: dict[str, Any], tags: Iterable[str]) -> dict[int, float]:
+    def _instant_values(
+        self, facts: dict[str, Any], tags: Iterable[str], *, devise: str = "USD"
+    ) -> dict[int, float]:
         """Valeurs de bilan (instantanees) rattachees a chaque exercice."""
         best: dict[int, tuple[date, str, float]] = {}
         for tag in tags:
-            entries = self._units(facts, tag)
+            entries = self._units(facts, tag, devise)
             if not entries:
                 continue
             for e in entries:
@@ -233,8 +342,6 @@ class EdgarClient:
     def annual_records(self, ticker: str) -> tuple[list[AnnualRecord], list[str]]:
         """Historique annuel normalise. Renvoie (enregistrements, avertissements)."""
         warnings: list[str] = []
-        self._period_ends = {}
-        self._filed = {}
         cik = self.ticker_to_cik(ticker)
         if not cik:
             return [], [f"{ticker} absent du registre SEC (société non cotée aux États-Unis)."]
@@ -243,8 +350,41 @@ class EdgarClient:
         if not facts:
             return [], [f"EDGAR : companyfacts indisponible pour {ticker} (CIK {cik})."]
 
-        flows = {name: self._annual_flows(facts, tags, name) for name, tags in FLOW_TAGS.items()}
-        instants = {name: self._instant_values(facts, tags) for name, tags in INSTANT_TAGS.items()}
+        # A fixer AVANT toute lecture : c'est elle qui determine quelle serie
+        # est lue pour chaque poste.
+        devise = self._devise_des_comptes(facts)
+        if devise != "USD":
+            warnings.append(
+                f"Comptes deposes a la SEC en {devise} : tous les postes "
+                f"sont lus dans cette devise."
+            )
+
+        # Tout l'etat de lecture est LOCAL a cet appel. Il vivait auparavant
+        # sur l'instance, partagee par les fils d'execution du screener : un
+        # titre lu en parallele d'un autre reinitialisait les dates de cloture
+        # au milieu de son analyse. Reproduit en test : les cinq exercices du
+        # titre le plus lent revenaient sans aucune date de cloture, ce qui
+        # supprime silencieusement son P/E historique et prive le
+        # retraitement des divisions d'actions de sa date de reference.
+        brut = {
+            name: self._annual_flows(
+                facts, tags, devise=devise, total_consolide=(name in TOTAUX_CONSOLIDES)
+            )
+            for name, tags in FLOW_TAGS.items()
+        }
+        flows = {name: {fy: v for fy, (_, v, _) in serie.items()} for name, serie in brut.items()}
+        clotures: dict[int, date] = {}
+        for serie in brut.values():
+            clotures.update({fy: fin for fy, (_, _, fin) in serie.items()})
+        depots = {
+            (name, fy): depot
+            for name in ("eps_diluted", "dividend_per_share")
+            for fy, (depot, _, _) in brut.get(name, {}).items()
+        }
+        instants = {
+            name: self._instant_values(facts, tags, devise=devise)
+            for name, tags in INSTANT_TAGS.items()
+        }
 
         years = sorted(
             set(flows["revenue"]) | set(flows["net_income"]) | set(instants["equity"])
@@ -283,11 +423,12 @@ class EdgarClient:
             records.append(
                 AnnualRecord(
                     fiscal_year=fy,
-                    period_end=self._period_ends.get(fy),
+                    period_end=clotures.get(fy),
+                    devise=devise,
                     filed={
-                        name: self._filed[(name, fy)]
+                        name: depots[(name, fy)]
                         for name in ("eps_diluted", "dividend_per_share")
-                        if (name, fy) in self._filed
+                        if (name, fy) in depots
                     },
                     values={
                         "revenue": flows["revenue"].get(fy),

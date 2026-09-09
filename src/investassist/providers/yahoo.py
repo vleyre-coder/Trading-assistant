@@ -247,6 +247,11 @@ class YahooClient:
             industry=info.get("industry"),
             country=info.get("country"),
             currency=info.get("currency"),
+            # « currency » est la devise de COTATION, « financialCurrency »
+            # celle des ETATS FINANCIERS. Les deux divergent pour les ADR et
+            # certains groupes europeens ; les confondre faussait tout ratio
+            # melangeant marche et comptabilite.
+            reporting_currency=info.get("financialCurrency"),
             exchange=info.get("exchange"),
             price=float(price) if price else None,
             market_cap=info.get("marketCap"),

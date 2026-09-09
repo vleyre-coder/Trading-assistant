@@ -61,7 +61,7 @@ def revenue_cagr(fund: Fundamentals) -> Result:
     value, reason = cagr(series)
     if value is None:
         return None, "", f"CAGR du chiffre d'affaires non calculable : {reason}"
-    cur = fund.snapshot.currency
+    cur = fund.devise_etats
     detail = (
         f"{series[0][0]} : {_fmt_money(series[0][1], cur)} → "
         f"{series[-1][0]} : {_fmt_money(series[-1][1], cur)} "
@@ -75,7 +75,7 @@ def net_income_cagr(fund: Fundamentals) -> Result:
     value, reason = cagr(series)
     if value is None:
         return None, "", f"CAGR du résultat net non calculable : {reason}"
-    cur = fund.snapshot.currency
+    cur = fund.devise_etats
     detail = (
         f"{series[0][0]} : {_fmt_money(series[0][1], cur)} → "
         f"{series[-1][0]} : {_fmt_money(series[-1][1], cur)}"
@@ -252,6 +252,20 @@ def cash_conversion(fund: Fundamentals) -> Result:
     return value, detail, ""
 
 
+def _raison_change(fund: Fundamentals) -> str:
+    """Motif d'indisponibilite quand un taux de change manque.
+
+    Un taux devine — ou pris egal a 1 — produirait un ratio faux presente
+    comme exact. Mieux vaut declarer le critere indisponible : l'interface
+    l'affiche alors comme tel et la couverture du pilier baisse, ce qui est
+    la verite de la situation.
+    """
+    return (
+        f"taux de change {fund.devise_cotation}/{fund.devise_etats} indisponible — "
+        "ratio non calculable sans mélanger deux devises"
+    )
+
+
 def fcf_yield(fund: Fundamentals) -> Result:
     """Rendement du free cash flow : FCF du dernier exercice / capitalisation.
 
@@ -262,15 +276,24 @@ def fcf_yield(fund: Fundamentals) -> Result:
     cap = fund.snapshot.market_cap
     if not cap or cap <= 0:
         return None, "", "capitalisation boursière non disponible"
+    # La capitalisation est en devise de COTATION, le free cash flow en devise
+    # des COMPTES. Les deux divergent pour ASML (comptes en euro, cotation en
+    # dollar) et TotalEnergies (comptes en dollar, cotation en euro) : sans
+    # conversion, le ratio additionne deux monnaies.
+    cap = fund.vers_etats(cap)
+    if cap is None:
+        return None, "", _raison_change(fund)
     for rec in reversed(fund.sorted_annual()):
         fcf = rec.get("free_cash_flow")
         if fcf is None:
             continue
-        cur = fund.snapshot.currency
+        cur = fund.devise_etats
         detail = (
             f"exercice {rec.fiscal_year} : free cash flow {_fmt_money(fcf, cur)} / "
             f"capitalisation {_fmt_money(cap, cur)}"
         )
+        if fund.devises_divergentes:
+            detail += f" (capitalisation convertie de {fund.devise_cotation})"
         if fcf < 0:
             detail += " (trésorerie consommée)"
         return fcf / cap, detail, ""
@@ -288,6 +311,12 @@ def ev_to_sales(fund: Fundamentals) -> Result:
     cap = fund.snapshot.market_cap
     if not cap or cap <= 0:
         return None, "", "capitalisation boursière non disponible"
+    # Meme melange de devises que pour le rendement du free cash flow : la
+    # valeur d'entreprise additionne une capitalisation (cotation) et une
+    # dette nette (comptes), puis la rapporte a un chiffre d'affaires.
+    cap = fund.vers_etats(cap)
+    if cap is None:
+        return None, "", _raison_change(fund)
     for rec in reversed(fund.sorted_annual()):
         revenue = rec.get("revenue")
         if not revenue or revenue <= 0:
@@ -295,7 +324,7 @@ def ev_to_sales(fund: Fundamentals) -> Result:
         debt, cash = rec.get("total_debt"), rec.get("cash")
         net_debt = (debt or 0.0) - (cash or 0.0)
         ve = cap + net_debt
-        cur = fund.snapshot.currency
+        cur = fund.devise_etats
         detail = (
             f"exercice {rec.fiscal_year} : capitalisation {_fmt_money(cap, cur)} + dette "
             f"nette {_fmt_money(net_debt, cur)} = {_fmt_money(ve, cur)} ; chiffre "
@@ -303,6 +332,8 @@ def ev_to_sales(fund: Fundamentals) -> Result:
         )
         if debt is None:
             detail += " (dette non publiée, valeur d'entreprise approchée)"
+        if fund.devises_divergentes:
+            detail += f" (capitalisation convertie de {fund.devise_cotation})"
         return ve / revenue, detail, ""
     return None, "", "chiffre d'affaires absent des données disponibles"
 
@@ -319,7 +350,7 @@ def interest_coverage(fund: Fundamentals) -> Result:
         op, interest = rec.get("operating_income"), rec.get("interest_expense")
         if op is None:
             continue
-        cur = fund.snapshot.currency
+        cur = fund.devise_etats
         if interest is None or interest <= 0:
             debt = rec.get("total_debt")
             if debt is not None and debt > 0:
@@ -345,7 +376,7 @@ def equity_to_assets(fund: Fundamentals) -> Result:
         equity, assets = rec.get("equity"), rec.get("total_assets")
         if equity is None or not assets or assets <= 0:
             continue
-        cur = fund.snapshot.currency
+        cur = fund.devise_etats
         detail = (
             f"exercice {rec.fiscal_year} : fonds propres {_fmt_money(equity, cur)} / "
             f"total de l'actif {_fmt_money(assets, cur)}"
@@ -411,7 +442,7 @@ def net_debt_to_ebitda(fund: Fundamentals) -> Result:
                 "aucune capacité de remboursement à rapporter à la dette"
             )
         net_debt = debt - (cash or 0.0)
-        cur = fund.snapshot.currency
+        cur = fund.devise_etats
         detail = (
             f"exercice {rec.fiscal_year} : dette {_fmt_money(debt, cur)} − trésorerie "
             f"{_fmt_money(cash, cur)} = {_fmt_money(net_debt, cur)} ; {base_label} "
@@ -428,7 +459,7 @@ def current_ratio(fund: Fundamentals) -> Result:
         ca, cl = rec.get("current_assets"), rec.get("current_liabilities")
         if ca is None or cl is None or cl == 0:
             continue
-        cur = fund.snapshot.currency
+        cur = fund.devise_etats
         detail = (
             f"exercice {rec.fiscal_year} : actifs courants {_fmt_money(ca, cur)} / "
             f"passifs courants {_fmt_money(cl, cur)}"
@@ -557,7 +588,22 @@ def historical_pe(fund: Fundamentals, prices: pd.DataFrame | None) -> tuple[list
         if window.empty:
             continue
         close = float(window["Close"].iloc[-1])
-        out.append((rec.fiscal_year, close / eps))
+        # Le cours est en devise de COTATION, le benefice par action en devise
+        # des COMPTES, et le taux applique est celui de la CLOTURE de
+        # l'exercice, pas celui d'aujourd'hui : un P/E passe se lit avec le
+        # change de l'epoque. Mesure sur ASML : la serie passe de
+        # (56, 39, 38, 36, 43) a (49, 36, 34, 35, 37), soit une mediane de
+        # 36,3 au lieu de 38,7 — le titre paraissait moins loin de sa
+        # moyenne historique qu'il ne l'est.
+        converti = fund.vers_etats(close, end)
+        if converti is None:
+            continue
+        out.append((rec.fiscal_year, converti / eps))
+    if not out and fund.devises_divergentes:
+        return [], (
+            f"taux de change {fund.devise_cotation}/{fund.devise_etats} "
+            "indisponible sur la période"
+        )
     return out, "" if out else "aucun exercice avec BPA positif et cours connu"
 
 
@@ -687,19 +733,39 @@ def margin_stability(fund: Fundamentals) -> Result:
     return valeur, detail, ""
 
 
-def market_size(fund: Fundamentals) -> Result:
-    """Capitalisation boursiere, en milliards.
+DEVISE_DE_REFERENCE = "EUR"
 
-    Approximation assumee : les capitalisations sont comparees sans
-    conversion de devise. Entre euro et dollar l'ecart reste inferieur a
-    l'echelle des paliers du bareme ; il fausserait en revanche une
-    comparaison avec une devise eloignee.
+
+def market_size(fund: Fundamentals) -> Result:
+    """Capitalisation boursiere, en milliards d'euros.
+
+    Ramenee a une devise unique : le bareme s'applique a un nombre, et
+    comparer 100 milliards de dollars a 100 milliards d'euros comme s'ils
+    etaient egaux introduit un ecart d'environ 15 %. Les paliers sont larges,
+    donc l'effet reste modeste — mais il est gratuit a corriger depuis que
+    les taux de reference de la BCE sont disponibles.
+
+    Si le taux manque, la valeur brute est conservee et le detail le dit :
+    perdre le critere serait pire que l'approximation, a condition de
+    l'annoncer.
     """
     cap = fund.snapshot.market_cap
     if not cap or cap <= 0:
         return None, "", "capitalisation boursière non disponible"
-    milliards = cap / 1e9
-    detail = f"{milliards:,.1f} milliards {fund.snapshot.currency or ''}".replace(",", " ")
+    devise = fund.devise_cotation or ""
+    facteur = fund.facteur_vers(DEVISE_DE_REFERENCE)
+    if facteur is None:
+        milliards = cap / 1e9
+        detail = (
+            f"{milliards:,.1f} milliards {devise}".replace(",", " ")
+            + f" (taux {devise}/{DEVISE_DE_REFERENCE} indisponible : valeur non convertie)"
+        )
+        return milliards, detail.strip(), ""
+    milliards = cap * facteur / 1e9
+    detail = f"{milliards:,.1f} milliards {DEVISE_DE_REFERENCE}".replace(",", " ")
+    if devise and devise != DEVISE_DE_REFERENCE:
+        brut = cap / 1e9
+        detail += f" (converti de {brut:,.1f} milliards {devise})".replace(",", " ")
     return milliards, detail.strip(), ""
 
 

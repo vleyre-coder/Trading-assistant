@@ -12,8 +12,15 @@ import logging
 from datetime import date, datetime
 
 from .config import Settings
-from .models import ANNUAL_FIELDS, AnnualRecord, Fundamentals, Snapshot
+from .models import (
+    ANNUAL_FIELDS,
+    CHAMPS_NON_MONETAIRES,
+    AnnualRecord,
+    Fundamentals,
+    Snapshot,
+)
 from .providers.base import DiskCache
+from .providers.change import ChangeClient
 from .providers.edgar import EdgarClient
 from .providers.esef import EsefClient
 from .providers.yahoo import YahooClient
@@ -71,6 +78,9 @@ class FundamentalsService:
         self.yahoo = YahooClient(settings, self.cache)
         self.edgar = EdgarClient(settings, self.cache)
         self.esef = EsefClient(settings, self.cache)
+        # Taux de change : sollicite uniquement quand la devise des
+        # comptes differe de celle de la cotation.
+        self.change = ChangeClient(settings, self.cache)
 
     def load(self, ticker: str, *, target_years: int = 5, use_cache: bool = True) -> Fundamentals:
         warnings: list[str] = []
@@ -96,6 +106,14 @@ class FundamentalsService:
             warnings.extend(w for w in edgar_warnings if "absent du registre SEC" not in w)
 
         yahoo_records, yahoo_warnings = self.yahoo.annual_records(ticker, use_cache=use_cache)
+        # Les etats financiers annuels de Yahoo sont libelles dans la devise
+        # de REPORTING de la societe, que Yahoo expose a part. Sans cette
+        # etiquette, une valeur en yuan pouvait completer un exercice en
+        # dollar : la marge brute de PDD Holdings ressortait alors a 394 % du
+        # chiffre d'affaires, et son free cash flow depassait ses ventes.
+        devise_yahoo = (snapshot.reporting_currency or snapshot.currency or "").upper() or None
+        for rec in yahoo_records:
+            rec.devise = devise_yahoo
 
         if edgar_records:
             base, complement = edgar_records, yahoo_records
@@ -114,25 +132,59 @@ class FundamentalsService:
                 ticker=ticker, snapshot=snapshot, annual=[], sources=sources,
                 warnings=warnings, region=region,
                 fetch_failed=snapshot.price is None,
+                change=self.change,
             )
 
         by_year: dict[int, AnnualRecord] = {r.fiscal_year: r for r in base}
+        # Devise des comptes : celle de la source PRINCIPALE, seule a couvrir
+        # tous les postes de facon homogene. Elle ne se deduit pas de la
+        # cotation : TotalEnergies cote en euro et publie en dollar.
+        devise_comptes = next(
+            (r.devise for r in base if r.devise), devise_yahoo
+        )
         for field in ANNUAL_FIELDS:
             if any(r.get(field) is not None for r in base):
                 sources[field] = primary
 
-        # Completion champ par champ, exercice par exercice.
+        # Completion champ par champ, exercice par exercice. Un montant venu
+        # d'une source qui compte dans une AUTRE devise est converti au taux
+        # de reference de la cloture de l'exercice, jamais recopie tel quel.
         filled: set[str] = set()
+        convertis: set[str] = set()
+        refuses: set[str] = set()
         for rec in complement:
             target = by_year.get(rec.fiscal_year)
             if target is None:
                 continue
+            facteur = self._facteur_de_completion(rec, target)
             for field in ANNUAL_FIELDS:
-                if target.get(field) is None and rec.get(field) is not None:
-                    target.values[field] = rec.values[field]
-                    filled.add(field)
+                if target.get(field) is not None or rec.get(field) is None:
+                    continue
+                valeur = rec.values[field]
+                if field not in CHAMPS_NON_MONETAIRES and facteur != 1.0:
+                    if facteur is None:
+                        # Taux introuvable : le poste reste absent. Une lacune
+                        # se voit dans la couverture ; un montant dans la
+                        # mauvaise monnaie ne se voit pas du tout.
+                        refuses.add(field)
+                        continue
+                    valeur = valeur * facteur
+                    convertis.add(field)
+                target.values[field] = valeur
+                filled.add(field)
         for field in filled:
             sources[field] = f"{sources.get(field, primary)}+{secondary}" if secondary else primary
+        if convertis:
+            warnings.append(
+                f"Postes completes depuis {secondary or 'une autre source'} et "
+                f"convertis en {devise_comptes} au taux de la clôture : "
+                f"{', '.join(sorted(convertis))}."
+            )
+        if refuses:
+            warnings.append(
+                f"Postes non repris faute de taux de change : "
+                f"{', '.join(sorted(refuses))}."
+            )
 
         # --- Retraitement des divisions d'actions (donnees EDGAR) --------
         if primary == "edgar":
@@ -174,7 +226,10 @@ class FundamentalsService:
 
         # --- Allongement de l'historique europeen par les depots ESEF ----
         if region == "EU" and self.settings.esef_enabled and by_year:
-            avertissement = self._completer_par_esef(ticker, by_year, target_years, sources)
+            avertissement = self._completer_par_esef(
+                ticker, by_year, target_years, sources,
+                devise_comptes=devise_comptes,
+            )
             if avertissement:
                 warnings.append(avertissement)
 
@@ -189,14 +244,44 @@ class FundamentalsService:
                 f"{window[-1].fiscal_year}) : historique gratuit limite pour ce titre."
             )
 
-        return Fundamentals(
+        resultat = Fundamentals(
             ticker=ticker,
             snapshot=snapshot,
             annual=window,
             sources=sources,
             warnings=warnings,
             region=region,
+            change=self.change,
+            devise_comptes=devise_comptes,
         )
+        # Divergence de devises : le dire a l'utilisateur, car elle change la
+        # lecture des montants affiches dans le detail des criteres.
+        if resultat.devises_divergentes:
+            warnings.append(
+                f"Comptes publies en {resultat.devise_etats} et cotation en "
+                f"{resultat.devise_cotation} : les ratios melangeant cours et "
+                "comptes sont convertis au taux de reference de la BCE."
+            )
+        return resultat
+
+    def _facteur_de_completion(
+        self, source: AnnualRecord, cible: AnnualRecord
+    ) -> float | None:
+        """Facteur pour verser un montant de <source> dans <cible>.
+
+        1,0 quand les deux exercices comptent dans la meme devise (cas de la
+        quasi-totalite des titres, sans aucun appel reseau). None quand elles
+        divergent et que le taux de la cloture est introuvable : l'appelant
+        laisse alors le poste absent.
+
+        Le taux retenu est celui de la CLOTURE de l'exercice, pas celui du
+        jour : un poste de 2022 se convertit avec la parite de 2022.
+        """
+        de = (source.devise or "").upper()
+        vers = (cible.devise or "").upper()
+        if not de or not vers or de == vers:
+            return 1.0
+        return self.change.facteur(de, vers, cible.period_end or source.period_end)
 
     # Ecart tolere entre deux sources sur un meme exercice. Au-dela, les deux
     # series ne decrivent pas le meme perimetre de consolidation et les
@@ -209,6 +294,7 @@ class FundamentalsService:
         by_year: dict[int, AnnualRecord],
         target_years: int,
         sources: dict[str, str],
+        devise_comptes: str | None = None,
     ) -> str:
         """Ajoute les exercices anterieurs lus dans le depot ESEF officiel.
 
@@ -233,6 +319,29 @@ class FundamentalsService:
             return ""
         if not recs:
             return ""
+
+        # Mise a la meme devise AVANT tout controle. Sans cela, un depot en
+        # euro confronte a une serie Yahoo en dollar divergeait de 15 % sur le
+        # chiffre d'affaires et l'historique ESEF etait ecarte pour un motif
+        # faux — « perimetres de consolidation differents » — alors que les
+        # deux sources disaient la meme chose dans deux monnaies.
+        # Cas concret : TotalEnergies, qui cote en euro et publie en dollar.
+        if devise_comptes:
+            for rec in recs:
+                if (rec.devise or devise_comptes) == devise_comptes:
+                    continue
+                cloture = rec.period_end or date(rec.fiscal_year, 12, 31)
+                facteur = self.change.facteur(rec.devise or "", devise_comptes, cloture)
+                if facteur is None:
+                    return (
+                        f"Historique ESEF écarté : dépôt libellé en "
+                        f"{rec.devise} et comptes en {devise_comptes}, taux de "
+                        "change de la clôture indisponible."
+                    )
+                for champ, valeur in list(rec.values.items()):
+                    if valeur is not None and champ not in CHAMPS_NON_MONETAIRES:
+                        rec.values[champ] = valeur * facteur
+                rec.devise = devise_comptes
 
         # Controle de concordance sur les exercices communs.
         for rec in recs:
