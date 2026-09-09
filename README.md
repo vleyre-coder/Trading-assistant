@@ -496,7 +496,7 @@ valorisables pour être significatif.
   des 2 derniers) dès que 4 exercices sont disponibles, pour ne pas dépendre
   d'un exercice exceptionnel.
 
-### Quatre pièges de données traités explicitement
+### Cinq pièges de données traités explicitement
 
 1. **Divisions d'actions.** EDGAR restitue les données par action *telles que
    publiées à l'époque du dépôt*, et retraite les comparatifs dans les dépôts
@@ -588,6 +588,28 @@ valorisables pour être significatif.
      **68 %** sur une fenêtre de trois ans partant d'un exercice déprimé.
      Ces deux titres étaient 8ᵉ et 12ᵉ du classement ; ils sont 23ᵉ et 25ᵉ
      avec une fenêtre complète.
+
+5. **Une moyenne, une fenêtre : deux pièges de statistique.** Trouvés en
+   repassant le contrôle d'invariants sur le classement recalculé.
+
+   - **La fenêtre d'analyse ne doit pas enjamber un trou.** « Les cinq
+     derniers exercices disponibles » n'est pas « les cinq derniers
+     exercices » : quand une source couvre les années anciennes et l'autre
+     les récentes, la liste saute des années. Xcel Energy retenait ainsi
+     2018, 2022, 2023, 2024, 2025 — une croissance annoncée « sur
+     5 exercices » calculée de 2018 à 2025, soit sur sept années, et une
+     évolution de marge comparant la moyenne 2018-2022 à la moyenne
+     2024-2025. La fenêtre part maintenant de l'exercice le plus récent et
+     s'arrête au premier trou : quatre exercices réels valent mieux que cinq
+     dont trois manquent, et le message le dit explicitement.
+   - **La conversion du bénéfice en trésorerie se lit à la médiane.** Même
+     piège que le P/E historique, déjà corrigé : le dénominateur (le
+     résultat net) peut approcher zéro. Kering affichait 0,89, 0,62, 1,24
+     puis **31,53** en 2025, marge nette tombée à 0 % — moyenne 8,57 et
+     score de 100/100 sur la qualité de ses bénéfices, là où la médiane vaut
+     1,07. Le critère exige en outre **trois exercices bénéficiaires**, comme
+     le P/E historique : CrowdStrike n'en avait qu'un, à 13,71, et obtenait
+     aussi 100/100 alors que sa marge nette moyenne est négative.
 
 ## Fonctionnalités
 

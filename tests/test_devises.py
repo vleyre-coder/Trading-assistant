@@ -334,3 +334,46 @@ def test_publication_la_plus_recente_gagne_toujours():
     for mode in (False, True):
         serie = _client()._annual_flows(faits, ("Revenues",), total_consolide=mode)
         assert serie[2025][1] == 90.0, f"mode total_consolide={mode}"
+
+
+# ================================= fenetre d'analyse contigue
+def test_la_fenetre_d_analyse_n_enjambe_jamais_un_trou():
+    """« Les cinq derniers exercices disponibles » n'est pas « les cinq
+    derniers exercices ». Quand une source couvre les annees anciennes et
+    l'autre les recentes, la liste saute des annees.
+
+    Cas mesure sur Xcel Energy : fenetre retenue 2018, 2022, 2023, 2024,
+    2025. La croissance annoncee « sur 5 exercices » etait calculee de 2018 a
+    2025 — sept annees — et l'evolution de la marge comparait la moyenne
+    2018-2022 a la moyenne 2024-2025. Mieux vaut quatre exercices reels.
+    """
+    from investassist.fundamentals import fenetre_contigue
+
+    exercices = [
+        AnnualRecord(fiscal_year=a, period_end=date(a, 12, 31), values={"revenue": 1.0})
+        for a in (2007, 2008, 2018, 2022, 2023, 2024, 2025)
+    ]
+    fenetre = fenetre_contigue(exercices, 5)
+    assert [r.fiscal_year for r in fenetre] == [2022, 2023, 2024, 2025]
+    portee = fenetre[-1].fiscal_year - fenetre[0].fiscal_year
+    assert portee == len(fenetre) - 1, "la fenetre doit etre contigue"
+
+
+def test_une_serie_contigue_reste_a_la_fenetre_visee():
+    """Controle de non-regression : le cas normal ne doit pas etre rogne."""
+    from investassist.fundamentals import fenetre_contigue
+
+    exercices = [
+        AnnualRecord(fiscal_year=a, period_end=date(a, 12, 31), values={"revenue": 1.0})
+        for a in range(2016, 2026)
+    ]
+    fenetre = fenetre_contigue(exercices, 5)
+    assert [r.fiscal_year for r in fenetre] == [2021, 2022, 2023, 2024, 2025]
+
+
+def test_fenetre_sur_une_liste_vide_ou_d_un_seul_exercice():
+    from investassist.fundamentals import fenetre_contigue
+
+    assert fenetre_contigue([], 5) == []
+    seul = [AnnualRecord(fiscal_year=2025, values={"revenue": 1.0})]
+    assert [r.fiscal_year for r in fenetre_contigue(seul, 5)] == [2025]

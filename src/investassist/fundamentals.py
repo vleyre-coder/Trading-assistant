@@ -71,6 +71,36 @@ def region_of(ticker: str, snapshot: Snapshot | None) -> str:
     return "US"
 
 
+def fenetre_contigue(
+    exercices: list[AnnualRecord], target_years: int
+) -> list[AnnualRecord]:
+    """Les <target_years> derniers exercices, CONTIGUS, ancres sur le plus recent.
+
+    « Les N derniers exercices disponibles » n'est pas « les N derniers
+    exercices » : quand une source couvre les annees anciennes et l'autre les
+    recentes, la liste saute des annees, et prendre les cinq dernieres valeurs
+    revient a enjamber le trou.
+
+    Cas mesure sur Xcel Energy : fenetre retenue 2018, 2022, 2023, 2024,
+    2025. La croissance annoncee « sur 5 exercices » etait calculee de 2018 a
+    2025 — sept annees — et l'evolution de la marge comparait la moyenne
+    2018-2022 a la moyenne 2024-2025. Mieux vaut quatre exercices reels que
+    cinq dont trois manquent.
+
+    <exercices> doit etre trie par exercice croissant.
+    """
+    if not exercices:
+        return []
+    fenetre = [exercices[-1]]
+    for rec in reversed(exercices[:-1]):
+        if len(fenetre) >= target_years:
+            break
+        if fenetre[0].fiscal_year - rec.fiscal_year != 1:
+            break
+        fenetre.insert(0, rec)
+    return fenetre
+
+
 class FundamentalsService:
     def __init__(self, settings: Settings, cache: DiskCache | None = None) -> None:
         self.settings = settings
@@ -233,15 +263,37 @@ class FundamentalsService:
             if avertissement:
                 warnings.append(avertissement)
 
-        # Fenetre : les N derniers exercices disponibles.
+        # Fenetre : les N derniers exercices disponibles, CONTIGUS.
+        #
+        # « Les N derniers » ne suffit pas : quand une source couvre les
+        # exercices anciens et l'autre les recents, la liste peut sauter des
+        # annees, et prendre les cinq dernieres valeurs revient a enjamber le
+        # trou. Cas mesure sur Xcel Energy : fenetre retenue 2018, 2022, 2023,
+        # 2024, 2025 — une croissance annoncee « sur 5 exercices » calculee de
+        # 2018 a 2025, soit sur sept annees, et une evolution de marge qui
+        # compare la moyenne 2018-2022 a la moyenne 2024-2025.
+        #
+        # La fenetre part donc de l'exercice le plus recent et remonte tant
+        # que les exercices se suivent. Mieux vaut quatre exercices reels que
+        # cinq dont trois manquent.
         records = sorted(by_year.values(), key=lambda r: r.fiscal_year)
         usable = [r for r in records if r.get("revenue") is not None]
-        window = usable[-target_years:] if usable else []
+        window = fenetre_contigue(usable, target_years)
 
         if window and len(window) < target_years:
+            plus_anciens = [
+                r.fiscal_year for r in usable if r.fiscal_year < window[0].fiscal_year
+            ]
+            motif = (
+                f"l'exercice {window[0].fiscal_year - 1} manque, alors que des "
+                f"exercices plus anciens existent (jusqu'à {min(plus_anciens)}) : "
+                "la fenêtre s'arrête au trou plutôt que de l'enjamber"
+                if plus_anciens
+                else "historique gratuit limite pour ce titre"
+            )
             warnings.append(
                 f"Fenêtre réduite a {len(window)} exercices ({window[0].fiscal_year}-"
-                f"{window[-1].fiscal_year}) : historique gratuit limite pour ce titre."
+                f"{window[-1].fiscal_year}) : {motif}."
             )
 
         resultat = Fundamentals(

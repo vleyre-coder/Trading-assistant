@@ -182,14 +182,49 @@ def test_conversion_en_tresorerie_ignore_les_exercices_deficitaires():
     """Sur un resultat net negatif le rapport change de signe et perd tout
     sens : l'exercice doit etre ecarte, pas produire un score flatteur."""
     fund = build({
-        2023: {"net_income": -50.0, "free_cash_flow": -10.0},
-        2024: {"net_income": 100.0, "free_cash_flow": 90.0},
+        2022: {"net_income": -50.0, "free_cash_flow": -10.0},
+        2023: {"net_income": 100.0, "free_cash_flow": 90.0},
+        2024: {"net_income": 100.0, "free_cash_flow": 100.0},
         2025: {"net_income": 200.0, "free_cash_flow": 220.0},
     })
     value, detail, missing = criteria.cash_conversion(fund)
     assert missing == ""
-    assert value == pytest.approx((0.9 + 1.1) / 2)
-    assert "2023" not in detail
+    assert value == pytest.approx(1.0)          # mediane de 0,9 / 1,0 / 1,1
+    assert "2022" not in detail
+
+
+def test_conversion_en_tresorerie_neutralise_un_exercice_a_benefice_quasi_nul():
+    """Meme piege que la moyenne du P/E historique : le denominateur peut
+    approcher zero. Mesure sur Kering — 0,89, 0,62, 1,24 puis 31,53 en 2025
+    (marge nette tombee a 0 %) — la moyenne donne 8,57 et un score de
+    100/100, la mediane 1,07.
+    """
+    fund = build({
+        2022: {"net_income": 100.0, "free_cash_flow": 89.0},
+        2023: {"net_income": 100.0, "free_cash_flow": 62.0},
+        2024: {"net_income": 100.0, "free_cash_flow": 124.0},
+        2025: {"net_income": 1.0, "free_cash_flow": 31.5},   # benefice quasi nul
+    })
+    value, detail, missing = criteria.cash_conversion(fund)
+    assert missing == ""
+    assert value == pytest.approx(1.065, abs=0.01)
+    assert "médiane" in detail
+    assert "atypique" in detail and "31.5" in detail
+
+
+def test_conversion_en_tresorerie_exige_trois_exercices():
+    """CrowdStrike n'avait qu'UN exercice benefiaire sur cinq, a 13,71, et
+    obtenait 100/100 sur la qualite de ses benefices alors que sa marge nette
+    moyenne est negative. Un exercice ne decrit pas une habitude comptable.
+    """
+    fund = build({
+        2023: {"net_income": -50.0, "free_cash_flow": 400.0},
+        2024: {"net_income": 10.0, "free_cash_flow": 137.0},
+        2025: {"net_income": -30.0, "free_cash_flow": 500.0},
+    })
+    value, _, missing = criteria.cash_conversion(fund)
+    assert value is None
+    assert "1 exercice(s) seulement" in missing
 
 
 def test_conversion_en_tresorerie_absente_si_aucun_exercice_beneficiaire():

@@ -223,6 +223,12 @@ def gross_margin_avg(fund: Fundamentals) -> Result:
     return value, detail, ""
 
 
+# Nombre minimal d'exercices benefiaires pour que la conversion du benefice en
+# tresorerie ait un sens. Aligne sur le P/E historique, qui exige aussi trois
+# points : un seul exercice ne decrit pas une habitude comptable.
+MINIMUM_EXERCICES_CONVERSION = 3
+
+
 def cash_conversion(fund: Fundamentals) -> Result:
     """Conversion du benefice en tresorerie : free cash flow / resultat net.
 
@@ -233,6 +239,16 @@ def cash_conversion(fund: Fundamentals) -> Result:
 
     Les exercices a resultat net negatif sont ecartes : le rapport y change de
     signe et perd toute lisibilite.
+
+    MEDIANE et non moyenne, et au moins trois exercices exploitables — meme
+    raison que pour le P/E historique. Le denominateur de ce rapport peut
+    approcher zero : un exercice a benefice quasi nul produit un ratio de
+    plusieurs dizaines qui tire la moyenne et fait passer la societe pour un
+    modele de conversion. Mesure sur l'univers analyse : Kering affichait
+    0,89, 0,62, 1,24 puis 31,53 en 2025 (marge nette tombee a 0 %), soit une
+    moyenne de 8,57 et un score de 100/100 — la mediane vaut 1,07.
+    CrowdStrike n'avait qu'UN exercice exploitable sur cinq, a 13,71, et
+    obtenait aussi 100/100 alors que sa marge nette moyenne est negative.
     """
     values: list[tuple[int, float]] = []
     for rec in fund.sorted_annual():
@@ -245,10 +261,22 @@ def cash_conversion(fund: Fundamentals) -> Result:
             "conversion non calculable (free cash flow indisponible ou aucun "
             "exercice bénéficiaire sur la fenêtre)"
         )
-    value = sum(v for _, v in values) / len(values)
-    detail = f"moyenne sur {len(values)} exercices : " + ", ".join(
+    if len(values) < MINIMUM_EXERCICES_CONVERSION:
+        return None, "", (
+            f"conversion mesurable sur {len(values)} exercice(s) seulement "
+            f"({MINIMUM_EXERCICES_CONVERSION} requis) : trop peu d'exercices "
+            "bénéficiaires sur la fenêtre pour en tirer une tendance"
+        )
+    ratios = [v for _, v in values]
+    value = statistics.median(ratios)
+    detail = f"médiane sur {len(values)} exercices : " + ", ".join(
         f"{y} {v:.2f}" for y, v in values
     )
+    if max(ratios) > 5 * value:
+        detail += (
+            f" — exercice atypique à {max(ratios):.1f} (bénéfice quasi nul) "
+            "neutralisé par la médiane"
+        )
     return value, detail, ""
 
 
